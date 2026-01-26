@@ -1,0 +1,17 @@
+# STM32 / CubeIDE build outputs
+Debug/
+Release/
+
+# Object & binary files
+*.o
+*.d
+*.elf
+*.map
+*.lst
+
+# CubeIDE generated settings (optional)
+.settings/
+
+# OS junk
+.DS_Store
+Thumbs.db
