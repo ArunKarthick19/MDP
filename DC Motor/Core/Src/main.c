@@ -58,7 +58,9 @@
 	#include "oled.h"
 	//#include "MPU6050.h"
 	#include <math.h>
-
+	float motor_C_speed_factor = 0.089;  // 70% of calculated speed (adjust 0.1 to 1.0)
+	float motor_D_speed_factor = 0.0769;
+	int direction_state = 0;
 	/* USER CODE END PV */
 
 	/* Private function prototypes -----------------------------------------------*/
@@ -123,24 +125,35 @@
 	}
 
 	void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin ) {
-		 // see EXTI0_IRQHandler() in stm32f4xx_it.c for interrupt
-		if ( GPIO_Pin == USER_PB_Pin) {
-			// toggle LED
-			HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12); // LED - A12
-			if (start == 0){
-				start = 1;
-				// reset all value to Zero
-				TIM2->CNT = 0; // Timer Counter Value
-				speed = 0;
-				position = 0;  // see SysTick_Handler in stm32f4xx_it.c
-				oldpos = 0; // see SysTick_Handler in stm32f4xx_it.c
-				angle = 0;
-				pwmVal = 0;
-				}
-			else
-				start = 0;
-			}
+	    // see EXTI0_IRQHandler() in stm32f4xx_it.c for interrupt
+	    if ( GPIO_Pin == USER_PB_Pin) {
+	        // toggle LED
+	        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12); // LED - A12
+
+	        // Toggle direction state
+	        direction_state = !direction_state;  // Simpler toggle: 0->1 or 1->0
+	    }
 	}
+
+//	void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin ) {
+//		 // see EXTI0_IRQHandler() in stm32f4xx_it.c for interrupt
+//		if ( GPIO_Pin == USER_PB_Pin) {
+//			// toggle LED
+//			HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12); // LED - A12
+//			if (start == 0){
+//				start = 1;
+//				// reset all value to Zero
+//				TIM2->CNT = 0; // Timer Counter Value
+//				speed = 0;
+//				position = 0;  // see SysTick_Handler in stm32f4xx_it.c
+//				oldpos = 0; // see SysTick_Handler in stm32f4xx_it.c
+//				angle = 0;
+//				pwmVal = 0;
+//				}
+//			else
+//				start = 0;
+//			}
+//	}
 
 	void MotorDrive_enable(void) {
 		  //Enable PWM through TIM4-CH1/CH4 to drive the DC motor - Rev D board
@@ -175,6 +188,18 @@
 	void MotorC_reverse(int pwm){
 	  __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, 0);
 	  __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_2, pwm);
+	}
+
+	void MotorD_reverse(int pwm){
+	  // Motor D forward
+	  __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_3, 0);  // IN1=0
+	  __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, pwm); // IN2=pwm
+	}
+
+	void MotorD_forward(int pwm){
+	  // Motor D reverse
+	  __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_3, pwm); // IN1=pwm
+	  __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, 0);   // IN2=0
 	}
 
 
@@ -457,45 +482,73 @@
 
 
 	  while (1){
-		  if (start==0){ // reset and wait for the User PB to be pressed
-			  Motor_stop();
-			  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_10); // LED
-			  OLED_ShowString(15, 40, "Press User"); // show message on OLED display at line 40)
-			  OLED_ShowString(0, 50, "button to start"); // show message on OLED display at line 50)
-			  OLED_Refresh_Gram();
-			  err = 0;// for checking whether error has settle down near to zero
-			  angle = 0;
-			  error_old = 0;
-			  error_area = 0;
-			  error = target_angle - angle;
-			  }
-		  while (start==0){ //wait for the User PB to be pressed
-			  HAL_Delay(500);
-			  millisOld = HAL_GetTick(); // get time value before starting - for PID
-			  }
+//		  if (start==0){ // reset and wait for the User PB to be pressed
+//			  Motor_stop();
+//			  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_10); // LED
+//			  OLED_ShowString(15, 40, "Press User"); // show message on OLED display at line 40)
+//			  OLED_ShowString(0, 50, "button to start"); // show message on OLED display at line 50)
+//			  OLED_Refresh_Gram();
+//			  err = 0;// for checking whether error has settle down near to zero
+//			  angle = 0;
+//			  error_old = 0;
+//			  error_area = 0;
+//			  error = target_angle - angle;
+//			  }
+//		  while (start==0){ //wait for the User PB to be pressed
+//			  HAL_Delay(500);
+//			  millisOld = HAL_GetTick(); // get time value before starting - for PID
+//			  }
 
 		  pwmVal = PID_Control(); // call the PID control loop calculation
 		  //pwmVal = 600;          // this will overwrite PID control above
 		  //error = 5;              // to overwrite control loop checking
 
-//		  if (direction == 0)
-//			  {Motor_reverse(pwmVal);
-//		  	  MotorC_reverse(pwmVal);}
-//		  else
-//			  {Motor_forward(pwmVal);
-//			  MotorC_forward(pwmVal	); }
+
 		  int32_t pwm = pwmVal;
 		  if (pwm < 0) pwm = -pwm;        // abs()
 		  if (pwm > pwmMax) pwm = pwmMax; // clamp
 
-		  if (direction == 0) {
-		    Motor_reverse(pwm);
-		    MotorC_reverse(pwm);
-		  } else {
-		    Motor_forward(pwm);
-		    MotorC_forward(pwm);
-		  }
+		  // Calculate separate speeds for C and D
+		  int32_t pwm_C = (int32_t)(pwm * motor_C_speed_factor);
+		  int32_t pwm_D = (int32_t)(pwm * motor_D_speed_factor);
 
+		  if (pwm_C > pwmMax) pwm_C = pwmMax;
+		  if (pwm_D > pwmMax) pwm_D = pwmMax;
+
+		    // Use direction_state to control motor direction
+		    if (direction_state == 0) {
+		        // Forward direction
+		        if (direction == 0) {
+		            Motor_reverse(pwm);      // Motor A
+		            MotorC_reverse(pwm_C);   // Motor C
+		            MotorD_reverse(pwm_D);   // Motor D
+		        } else {
+		            Motor_forward(pwm);      // Motor A
+		            MotorC_forward(pwm_C);   // Motor C
+		            MotorD_forward(pwm_D);   // Motor D
+		        }
+		    } else {
+		        // Reverse direction (swap forward/reverse)
+		        if (direction == 0) {
+		            Motor_forward(pwm);      // Motor A (reversed)
+		            MotorC_forward(pwm_C);   // Motor C (reversed)
+		            MotorD_forward(pwm_D);   // Motor D (reversed)
+		        } else {
+		            Motor_reverse(pwm);      // Motor A (reversed)
+		            MotorC_reverse(pwm_C);   // Motor C (reversed)
+		            MotorD_reverse(pwm_D);   // Motor D (reversed)
+		        }
+		    }
+
+//		  if (direction == 0) {
+//		    Motor_reverse(pwm);      // Motor A
+//		    MotorC_reverse(pwm_C);   // Motor C at 70% speed
+//		    MotorD_reverse(pwm_D);   // Motor D at 50% speed
+//		  } else {
+//		    Motor_forward(pwm);      // Motor A
+//		    MotorC_forward(pwm_C);   // Motor C at 70% speed
+//		    MotorD_forward(pwm_D);   // Motor D at 50% speed
+//		  }
 		  if (abs(error) <= 3){ // error is not more than 3 deg - assume steady state
 			  err++; // to keep track how long it has reached steady state
 			  angle = (int)(position*360/260);  //calculate the angle
@@ -505,20 +558,18 @@
 		  serial_uart(); // send the various data to the serial port for display
 
 		  if (err > 5) { // error has settled to within the acceptance ranges
-			 Motor_stop();
+		          // Optional: Add buzzer feedback when target reached
+		          HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_10); //Buzzer On
+		          HAL_Delay(500);
+		          HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_10); //Buzzer Off
+		          err = 0; // Reset error counter to continue running
+		      }
 
-			 for (i=0; i<50; i++)
-				serial_uart();
-
-			 start = 0;  // wait for PB to restart
-			 HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_10); //Buzzer On
-			 HAL_Delay(500);
-			 HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_10); //Buzzer Off
-			 }//if
-
-		  OLED_ShowString(15, 40, "Press User"); // show message on OLED display at line 40)
-		  OLED_ShowString(0, 50, "button to stop "); // show message on OLED display at line 50)
-		  OLED_Refresh_Gram();
+		      // Update OLED display
+		      sprintf(buf, "Dir:%s", direction_state == 0 ? "FWD" : "REV");
+		      OLED_ShowString(0, 40, buf);
+		      OLED_ShowString(0, 50, "Press to swap");
+		      OLED_Refresh_Gram();
 
 		/* USER CODE END WHILE */
 
@@ -655,7 +706,7 @@
 	  }
 	  sConfigOC.OCMode = TIM_OCMODE_PWM1;
 	  sConfigOC.Pulse = 0;
-	  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+	  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
 	  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
 	  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
 	  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
