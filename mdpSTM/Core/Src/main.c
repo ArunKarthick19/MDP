@@ -22,6 +22,7 @@
 	/* Private includes ----------------------------------------------------------*/
 	/* USER CODE BEGIN Includes */
 	#include "oled.h"
+	#include <string.h>
 	//#include "ICM20948.h"
 	//#include <math.h>
 	/* USER CODE END Includes */
@@ -58,8 +59,8 @@
 	#include "oled.h"
 	//#include "MPU6050.h"
 	#include <math.h>
-	float motor_D_speed_factor = 0.5; //0.0769
-	float motor_A_speed_factor = 0.5;  // ADD THIS LINE - start with same as D, then tune
+	float motor_D_speed_factor = 0.3; //0.0769
+	float motor_A_speed_factor = 0.3;  // ADD THIS LINE - start with same as D, then tune
 
 	// For 1ms-2ms pulse width (standard servo)
 	int32_t servo_left = 1000;     // 1.0ms = right (0°)
@@ -80,6 +81,16 @@
 	uint32_t last_mode_tick = 0;
 	const uint32_t MODE_INTERVAL_MS = 600;  // 1 second
 
+	// Distance control variables
+	#define WHEEL_DIAMETER_CM 6.8436  // Measure your actual wheel diameter!
+	#define COUNTS_PER_ROTATION 260 // From your encoder specs
+	#define CM_PER_COUNT (3.14159 * WHEEL_DIAMETER_CM / COUNTS_PER_ROTATION)
+
+
+	int32_t distance_target_counts = 0;  // Target distance in encoder counts
+	int32_t distance_start_position = 0; // Starting position
+	int distance_mode = 0;                // 0=idle, 1=moving
+
 	/* USER CODE END PV */
 
 	/* Private function prototypes -----------------------------------------------*/
@@ -97,7 +108,8 @@
 	static void MX_TIM11_Init(void);
 	static void MX_TIM12_Init(void);  // ADD THIS LINE
 	/* USER CODE BEGIN PFP */
-
+	void fwd(int distance_cm);  // ADD THIS LINE
+	int check_distance_complete(void);  // ADD THIS LINE
 	/* USER CODE END PFP */
 
 	/* Private user code ---------------------------------------------------------*/
@@ -176,34 +188,9 @@
 	    if (GPIO_Pin == USER_PB_Pin) {
 	        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12);
 
-	        mode++;
-	        if (mode > 18) mode = 0;
-
-	        switch(mode) {
-	        	case 0: motor_running = 0; Servo_SetPWM(servo_straight); break;  // STOPPED + LEFT
-	            case 1: motor_running = 0; Servo_SetPWM(servo_left1); break;  // STOP + STRAIGHT
-	            case 2: motor_running = 0; Servo_SetPWM(servo_left2); break;  // STOP + RIGHT
-	            case 3: motor_running = 0; Servo_SetPWM(servo_left); break;  // STOPPED + LEFT
-	            case 4: motor_running = 0; Servo_SetPWM(servo_left2); break;  // STOP + STRAIGHT
-	            case 5: motor_running = 0; Servo_SetPWM(servo_left1); break;  // STOP + RIGHT
-	            case 6: motor_running = 0; Servo_SetPWM(servo_straight); break;  // STOPPED + LEFT
-	            case 7: motor_running = 0; Servo_SetPWM(servo_right1); break;  // STOP + STRAIGHT
-				case 8: motor_running = 0; Servo_SetPWM(servo_right2); break;  // STOP + RIGHT
-				case 9: motor_running = 0; Servo_SetPWM(servo_right); break;  // STOPPED + LEFT
-				case 10: motor_running = 0; Servo_SetPWM(servo_right2); break;  // STOP + STRAIGHT
-				case 11: motor_running = 0; Servo_SetPWM(servo_right1); break;  // STOP + RIGHT
-				case 12: motor_running = 0; Servo_SetPWM(servo_straight); break;  // STOPPED + LEFT
-
-	            case 13: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_straight); break; //FWD + STRAIGHT
-	            case 14: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_left); break;//FWD + LEFT
-	            case 15: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_right); break;//FWD + RIGHT
-	            case 16: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_straight); break;//REV + STRAIGHT
-	            case 17: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_left); break;//REV + LEFT
-	            case 18: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_right); break;//REV + RIGHT
-
-	        	//case : motor_running = 1; motor_direction = 2; Servo_SetPWM(servo_left); break; //crab turn
-
-	        }
+	        // Press button to move forward 100cm
+	        //distancetomove
+	        fwd(100);
 	    }
 	}
 //	void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin ) {
@@ -412,31 +399,91 @@
 			} // if loop
 	}
 
-	void Apply_Mode(int mode)
-	{
-	    switch(mode) {
-	        case 0:  motor_running = 0; Servo_SetPWM(servo_straight); break;
-	        case 1:  motor_running = 0; Servo_SetPWM(servo_left1); break;
-	        case 2:  motor_running = 0; Servo_SetPWM(servo_left2); break;
-	        case 3:  motor_running = 0; Servo_SetPWM(servo_left); break;
-	        case 4:  motor_running = 0; Servo_SetPWM(servo_left2); break;
-	        case 5:  motor_running = 0; Servo_SetPWM(servo_left1); break;
-	        case 6:  motor_running = 0; Servo_SetPWM(servo_straight); break;
-	        case 7:  motor_running = 0; Servo_SetPWM(servo_right1); break;
-	        case 8:  motor_running = 0; Servo_SetPWM(servo_right2); break;
-	        case 9:  motor_running = 0; Servo_SetPWM(servo_right); break;
-	        case 10: motor_running = 0; Servo_SetPWM(servo_right2); break;
-	        case 11: motor_running = 0; Servo_SetPWM(servo_right1); break;
-	        case 12: motor_running = 0; Servo_SetPWM(servo_straight); break;
+	/* USER CODE BEGIN 0 */
+	// ... existing code ...
 
-	        case 13: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_straight); break;
-	        case 14: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_left); break;
-	        case 15: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_right); break;
-	        case 16: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_straight); break;
-	        case 17: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_left); break;
-	        case 18: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_right); break;
-	    }
+	void fwd(int distance_cm) {
+	    // Convert cm to encoder counts
+		 distance_target_counts = (int32_t)((distance_cm / CM_PER_COUNT) * 1.495);
+
+
+	    // Reset encoders to zero
+	    TIM2->CNT = 0;
+	    TIM5->CNT = 0;
+
+	    // Store starting position
+	    distance_start_position = 0;
+	    position = 0;
+
+	    // Set to forward direction, straight
+	    motor_running = 1;
+	    motor_direction = 0;  // 0 = forward
+	    Servo_SetPWM(servo_straight);
+
+	    // Enable distance mode
+	    distance_mode = 1;
+
+	    // Reset error tracking
+	    error = 0;
+	    error_old = 0;
+	    error_area = 0;
+	    err = 0;
+
+	    sprintf(buf, "Moving %dcm\r\n", distance_cm);
+	    HAL_UART_Transmit(&huart3, (uint8_t*)buf, strlen(buf), HAL_MAX_DELAY);
 	}
+
+	int check_distance_complete() {
+	    if (distance_mode == 0) return 1; // Not in distance mode
+
+	    int32_t distance_traveled = abs(position - distance_start_position);
+
+	    if (distance_traveled >= distance_target_counts) {
+	        // Target reached!
+	        Motor_stop();
+	        distance_mode = 0;
+	        motor_running = 0;
+
+	        // Buzzer feedback
+	        HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_10);
+	        HAL_Delay(200);
+	        HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_10);
+
+	        sprintf(buf, "Complete! %d counts\r\n", distance_traveled);
+	        HAL_UART_Transmit(&huart3, (uint8_t*)buf, strlen(buf), HAL_MAX_DELAY);
+
+	        return 1; // Complete
+	    }
+
+	    return 0; // Still moving
+	}
+	/* USER CODE END 0 */
+
+//	void Apply_Mode(int mode)
+//	{
+//	    switch(mode) {
+//	        case 0:  motor_running = 0; Servo_SetPWM(servo_straight); break;
+//	        case 1:  motor_running = 0; Servo_SetPWM(servo_left1); break;
+//	        case 2:  motor_running = 0; Servo_SetPWM(servo_left2); break;
+//	        case 3:  motor_running = 0; Servo_SetPWM(servo_left); break;
+//	        case 4:  motor_running = 0; Servo_SetPWM(servo_left2); break;
+//	        case 5:  motor_running = 0; Servo_SetPWM(servo_left1); break;
+//	        case 6:  motor_running = 0; Servo_SetPWM(servo_straight); break;
+//	        case 7:  motor_running = 0; Servo_SetPWM(servo_right1); break;
+//	        case 8:  motor_running = 0; Servo_SetPWM(servo_right2); break;
+//	        case 9:  motor_running = 0; Servo_SetPWM(servo_right); break;
+//	        case 10: motor_running = 0; Servo_SetPWM(servo_right2); break;
+//	        case 11: motor_running = 0; Servo_SetPWM(servo_right1); break;
+//	        case 12: motor_running = 0; Servo_SetPWM(servo_straight); break;
+//
+//	        case 13: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_straight); break;
+//	        case 14: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_left); break;
+//	        case 15: motor_running = 1; motor_direction = 0; Servo_SetPWM(servo_right); break;
+//	        case 16: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_straight); break;
+//	        case 17: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_left); break;
+//	        case 18: motor_running = 1; motor_direction = 1; Servo_SetPWM(servo_right); break;
+//	    }
+//	}
 
 
 	void serial_uart(){
@@ -630,18 +677,33 @@
 
 		  uint32_t now = HAL_GetTick();
 
-		  if (now - last_mode_tick >= MODE_INTERVAL_MS)
-		  {
-		      last_mode_tick = now;
+//		  if (now - last_mode_tick >= MODE_INTERVAL_MS)
+//		  {
+//		      last_mode_tick = now;
+//
+//		      mode++;
+//		      if (mode > 18)
+//		          mode = 0;
+//
+//		      Apply_Mode(mode);
+//		  }
 
-		      mode++;
-		      if (mode > 18)
-		          mode = 0;
+		  while (1) {
+		      // Check if distance movement is complete
+		      if (distance_mode == 1) {
+		          check_distance_complete();
+		      }
 
-		      Apply_Mode(mode);
-		  }
-
-
+		      // Original mode cycling code (disabled when in distance mode)
+		      if (distance_mode == 0) {
+		          uint32_t now = HAL_GetTick();
+		          if (now - last_mode_tick >= MODE_INTERVAL_MS) {
+		              last_mode_tick = now;
+		              mode++;
+//		              if (mode > 18) mode = 0;
+//		              Apply_Mode(mode);
+		          }
+		      }
 		  pwmVal = PID_Control(); // call the PID control loop calculation
 		  //pwmVal = 600;          // this will overwrite PID control above
 		  //error = 5;              // to overwrite control loop checking
@@ -723,34 +785,45 @@
 //				  "REV+STRAIGHT  ",
 //				  "REV+LEFT      ",
 //				  "REV+RIGHT     "};
-		  const char* mode_names[] = {
-				  	  	  "0 ",
-						  "1 ",
-						  "2 ",
-						  "3 ",
-						  "4 ",
-						  "5 ",
-						  "6 ",
-						  "7 ",
-						  "8 ",
-						  "9 ",
-						  "10 ",
-						  "11 ",
-						  "12 ",
-						  "13 ",
-						  "14 ",
-						  "15 ",
-						  "16 ",
-						  "17 ",
-						  "18 "
+//		  const char* mode_names[] = {
+//				  	  	  "0 ",
+//						  "1 ",
+//						  "2 ",
+//						  "3 ",
+//						  "4 ",
+//						  "5 ",
+//						  "6 ",
+//						  "7 ",
+//						  "8 ",
+//						  "9 ",
+//						  "10 ",
+//						  "11 ",
+//						  "12 ",
+//						  "13 ",
+//						  "14 ",
+//						  "15 ",
+//						  "16 ",
+//						  "17 ",
+//						  "18 "
+//
+//		  				  	  	  };
+//		  sprintf(buf, "Mode: %d", mode);
+//		  OLED_ShowString(0, 20, buf);
+//
+//		  OLED_ShowString(0, 30, mode_names[mode]);
+//
+//		  OLED_Refresh_Gram();
 
-		  				  	  	  };
-		  sprintf(buf, "Mode: %d", mode);
-		  OLED_ShowString(0, 20, buf);
 
-		  OLED_ShowString(0, 30, mode_names[mode]);
+		    if (distance_mode == 1 || distance_mode ==0) {
+		        int32_t traveled = abs(position - distance_start_position);
+		        int32_t cm_traveled = (int32_t)(traveled * CM_PER_COUNT);
 
-		  OLED_Refresh_Gram();
+		        sprintf(buf, "Dist: %dcm", cm_traveled);
+		        OLED_ShowString(0, 20, buf);
+		        OLED_Refresh_Gram();
+		    }
+		}
 
 		/* USER CODE END WHILE */
 
