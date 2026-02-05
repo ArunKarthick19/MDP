@@ -91,6 +91,159 @@
 	int32_t distance_start_position = 0; // Starting position
 	int distance_mode = 0;                // 0=idle, 1=moving
 
+	// -------- ICM-20948 minimal accel+gyro test (I2C) --------
+	#define ICM20948_ADDR_7BIT   0x68                 // AD0 low -> 0x68 (common)
+	#define ICM20948_ADDR        (ICM20948_ADDR_7BIT << 1) // HAL wants 8-bit addr
+
+	#define REG_BANK_SEL         0x7F
+	#define WHO_AM_I             0x00
+	#define PWR_MGMT_1           0x06
+
+	#define ACCEL_XOUT_H         0x2D
+	#define GYRO_XOUT_H          0x33
+
+	// ===== Turn control using ICM-20948 gyro Z =====
+	static float gyro_z_bias_dps = 0.0f;   // bias (deg/s)
+	static float yaw_deg = 0.0f;           // integrated angle (deg)
+	static uint32_t yaw_t_prev_ms = 0;
+
+	static float absf(float x){ return (x < 0) ? -x : x; }
+
+	// Forward declaration (put near the top, before icm_get_gz_dps)
+	static uint8_t icm_read_accel_gyro(int16_t *ax, int16_t *ay, int16_t *az,
+	                                   int16_t *gx, int16_t *gy, int16_t *gz);
+
+	static float icm_get_gz_dps(void)
+	{
+	    int16_t ax, ay, az, gx, gy, gz;
+	    if (!icm_read_accel_gyro(&ax,&ay,&az,&gx,&gy,&gz)) return 0.0f;
+
+	    // Common assumption: gyro full-scale = ±250 dps => 131 LSB/dps
+	    // If you configure a different range later, update this constant.
+	    return ((float)gz / 131.0f);
+	}
+
+	static void gyro_calibrate_bias(void)
+	{
+	    const int N = 300;
+	    float sum = 0.0f;
+
+	    for (int i = 0; i < N; i++) {
+	        sum += icm_get_gz_dps();
+	        HAL_Delay(5);
+	    }
+	    gyro_z_bias_dps = sum / (float)N;
+	}
+
+
+	static volatile uint8_t oled_page = 1;  // 1..8
+	static volatile uint8_t imu_ready = 0;
+
+	static HAL_StatusTypeDef icm_write_u8(uint8_t reg, uint8_t val)
+	{
+	    return HAL_I2C_Mem_Write(&hi2c2, ICM20948_ADDR, reg, I2C_MEMADD_SIZE_8BIT, &val, 1, 100);
+	}
+
+	static HAL_StatusTypeDef icm_read(uint8_t reg, uint8_t *buf, uint16_t len)
+	{
+	    return HAL_I2C_Mem_Read(&hi2c2, ICM20948_ADDR, reg, I2C_MEMADD_SIZE_8BIT, buf, len, 100);
+	}
+
+	static void icm_select_bank(uint8_t bank) // bank: 0..3
+	{
+	    // Datasheet uses USER_BANK in REG_BANK_SEL; common libs set bank in bits [5:4]
+	    icm_write_u8(REG_BANK_SEL, (bank << 4));
+	}
+
+	static uint8_t icm_whoami(void)
+	{
+	    uint8_t v = 0x00;
+	    icm_select_bank(0);
+	    if (icm_read(WHO_AM_I, &v, 1) != HAL_OK) return 0x00;
+	    return v;
+	}
+
+	static uint8_t icm_init_minimal(void)
+	{
+	    icm_select_bank(0);
+
+	    // Wake from sleep: write 0x01 to PWR_MGMT_1 (common init sequence)
+	    // (Clock select + sleep cleared)
+	    if (icm_write_u8(PWR_MGMT_1, 0x01) != HAL_OK) return 0;
+
+	    HAL_Delay(50);
+
+	    // Verify sensor ID
+	    uint8_t id = icm_whoami();
+	    if (id != 0xEA) return 0;
+
+	    return 1;
+	}
+
+	static void OLED_ShowGyro(void)
+	{
+	    int16_t ax, ay, az, gx, gy, gz;
+
+	    if (!imu_ready) {
+	        OLED_ShowString(0, 0, "ICM20948 FAIL");
+	        OLED_Refresh_Gram();
+	        return;
+	    }
+
+	    if (!icm_read_accel_gyro(&ax,&ay,&az,&gx,&gy,&gz)) {
+	        OLED_ShowString(0, 0, "IMU READ ERR");
+	        OLED_Refresh_Gram();
+	        return;
+	    }
+
+	    // Convert to deg/s if using ±250 dps range (131 LSB/dps)
+	    int gx_dps = (int)((float)gx / 131.0f);
+	    int gy_dps = (int)((float)gy / 131.0f);
+	    int gz_dps = (int)((float)gz / 131.0f);
+
+	    char l1[21], l2[21], l3[21];
+
+	    snprintf(l1, sizeof(l1), "GX:%4d  GY:%4d", gx_dps, gy_dps);
+	    snprintf(l2, sizeof(l2), "GZ:%4d dps", gz_dps);
+	    snprintf(l3, sizeof(l3), "rawZ:%6d", gz);
+
+	    OLED_Clear();
+	    OLED_ShowString(0, 0, "Gyro (dps)");
+	    OLED_ShowString(0, 20, l1);
+	    OLED_ShowString(0, 40, l2);
+	    // optional extra line:
+	    // OLED_ShowString(0, 50, l3);
+	    OLED_Refresh_Gram();
+	}
+
+
+	static int16_t be16_to_i16(uint8_t hi, uint8_t lo)
+	{
+	    return (int16_t)((hi << 8) | lo);
+	}
+
+	static uint8_t icm_read_accel_gyro(int16_t *ax, int16_t *ay, int16_t *az,
+	                                   int16_t *gx, int16_t *gy, int16_t *gz)
+	{
+	    uint8_t buf[12];
+	    icm_select_bank(0);
+
+	    // Read accel(6) + gyro(6) in two reads to keep it simple & reliable
+	    if (icm_read(ACCEL_XOUT_H, buf, 6) != HAL_OK) return 0;
+	    *ax = be16_to_i16(buf[0], buf[1]);
+	    *ay = be16_to_i16(buf[2], buf[3]);
+	    *az = be16_to_i16(buf[4], buf[5]);
+
+	    if (icm_read(GYRO_XOUT_H, buf, 6) != HAL_OK) return 0;
+	    *gx = be16_to_i16(buf[0], buf[1]);
+	    *gy = be16_to_i16(buf[2], buf[3]);
+	    *gz = be16_to_i16(buf[4], buf[5]);
+
+	    return 1;
+	}
+
+
+
 	/* USER CODE END PV */
 
 	/* Private function prototypes -----------------------------------------------*/
@@ -184,15 +337,24 @@
 //	        }
 //	    }
 //	}
-	void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	    if (GPIO_Pin == USER_PB_Pin) {
-	        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12);
+	volatile uint8_t do_left_turn = 0;
+	//buttoncode
+//	void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+//	{
+//	    if (GPIO_Pin == USER_PB_Pin)
+//	    {
+//	        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12);
+//
+//	        // simple debounce guard (optional but helpful)
+//	        static uint32_t last_ms = 0;
+//	        uint32_t now = HAL_GetTick();
+//	        if (now - last_ms < 200) return;
+//	        last_ms = now;
+//
+//	        do_left_turn = 1;   // request a left turn (handled in main loop)
+//	    }
+//	}
 
-	        // Press button to move forward 100cm
-	        //distancetomove
-	        fwd(100);
-	    }
-	}
 //	void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin ) {
 //		 // see EXTI0_IRQHandler() in stm32f4xx_it.c for interrupt
 //		if ( GPIO_Pin == USER_PB_Pin) {
@@ -335,6 +497,56 @@
 //		OLED_ShowString(0, 20, buf);
 		//OLED_Refresh_Gram();
 	}
+
+	void turn_left_gyro(float target_deg)
+	{
+	    yaw_deg = 0.0f;
+	    yaw_t_prev_ms = HAL_GetTick();
+
+	    Servo_SetPWM(servo_left);
+
+	    int turn_pwm = 1800;
+	    Motor_forward(turn_pwm);
+
+	    uint32_t last_disp = 0;
+
+	    while (absf(yaw_deg) < target_deg)
+	    {
+	        uint32_t now = HAL_GetTick();
+	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
+	        yaw_t_prev_ms = now;
+
+	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
+
+	        yaw_deg += gz_dps * dt;
+
+	        // ===== OLED DISPLAY =====
+	        if (now - last_disp > 100)
+	        {
+	            last_disp = now;
+
+	            char l1[21], l2[21];
+
+	            snprintf(l1, sizeof(l1), "GZ:%4d dps", (int)gz_dps);
+	            snprintf(l2, sizeof(l2), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
+
+	            OLED_ShowString(0, 20, "                ");
+	            OLED_ShowString(0, 40, "                ");
+	            OLED_ShowString(0, 20, l1);
+	            OLED_ShowString(0, 40, l2);
+	            OLED_Refresh_Gram();
+	        }
+
+	        HAL_Delay(5);
+	    }
+
+	    Motor_stop();
+	    Servo_SetPWM(servo_straight);
+
+	    HAL_Delay(1500);
+	    Motor_stop();
+	}
+
 
 
 	int16_t PID_Control(){
@@ -608,6 +820,8 @@
 	  OLED_ShowString(40, 30, "GROUP 25"); // show message on OLED display at line 30)
 	  oled_buf = "Motor Control"; // anther way to show message through buffer
 	  OLED_ShowString(10,50, oled_buf); //another message at line 50
+	  imu_ready = icm_init_minimal();
+	  gyro_calibrate_bias();
 
 	  uint8_t sbuf[] = "SC2104\n\r";  // send to serial port
 	  HAL_UART_Transmit(&huart3, sbuf, sizeof(sbuf), HAL_MAX_DELAY); // Send through Serial Port @115200
@@ -689,6 +903,37 @@
 //		  }
 
 		  while (1) {
+			  do_left_turn = 1;
+
+			  static uint32_t last_oled_ms = 0;
+			  uint32_t now_ms = HAL_GetTick();
+
+			  if (now_ms - last_oled_ms > 200) {   // update 5 times/sec
+			      last_oled_ms = now_ms;
+			      OLED_ShowGyro();
+			  }
+
+
+			  if (do_left_turn) {
+			      do_left_turn = 0;
+
+			      motor_running = 0;
+			      Motor_stop();
+
+			      OLED_Clear();
+			      OLED_ShowString(0, 0, "Turning left");
+			      OLED_ShowString(0, 20, "Target: 90 deg");
+			      OLED_Refresh_Gram();
+
+			      turn_left_gyro(90.0f);
+
+			      OLED_Clear();
+			      OLED_ShowString(0, 0, "Turn done");
+			      OLED_Refresh_Gram();
+
+			      motor_running = 1;
+			  }
+
 		      // Check if distance movement is complete
 		      if (distance_mode == 1) {
 		          check_distance_complete();
@@ -814,15 +1059,41 @@
 //
 //		  OLED_Refresh_Gram();
 
+//accel gyro  reading
+//		  if (oled_page == 4) {
+//		      OLED_Clear();
+//
+//		      OLED_ShowString(0, 0, "Display 4/8");
+//
+//		      if (!imu_ready) {
+//		          OLED_ShowString(0, 20, "ICM20948 FAIL");
+//		          OLED_Refresh_Gram();
+//		      } else {
+//		          int16_t ax, ay, az, gx, gy, gz;
+//		          if (icm_read_accel_gyro(&ax,&ay,&az,&gx,&gy,&gz)) {
+//
+//		              // For lab observation:
+//		              // Accel raw around 16384 (1g) when axis aligned with gravity
+//		              // Gyro should be near 0 dps; show single digit by converting
+//		              float gz_dps = (float)gz / 131.0f; // 131 LSB/dps for ±250 dps (common)
+//		              if (gz_dps < 0) gz_dps = -gz_dps;
+//
+//		              char line1[21], line2[21];
+//		              snprintf(line1, sizeof(line1), "AZ(raw): %d", (int)az);
+//		              snprintf(line2, sizeof(line2), "GZ(dps): %d", (int)(gz_dps + 0.5f));
+//
+//		              OLED_ShowString(0, 20, line1);
+//		              OLED_ShowString(0, 40, line2);
+//		              OLED_Refresh_Gram();
+//		          } else {
+//		              OLED_ShowString(0, 20, "IMU READ ERR");
+//		              OLED_Refresh_Gram();
+//		          }
+//		      }
+//
+//		      HAL_Delay(100);
+//		  }
 
-		    if (distance_mode == 1 || distance_mode ==0) {
-		        int32_t traveled = abs(position - distance_start_position);
-		        int32_t cm_traveled = (int32_t)(traveled * CM_PER_COUNT);
-
-		        sprintf(buf, "Dist: %dcm", cm_traveled);
-		        OLED_ShowString(0, 20, buf);
-		        OLED_Refresh_Gram();
-		    }
 		}
 
 		/* USER CODE END WHILE */
