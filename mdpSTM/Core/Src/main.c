@@ -505,8 +505,58 @@
 
 	    Servo_SetPWM(servo_left);
 
-	    int turn_pwm = 1800;
+	    int turn_pwm = 1700;
 	    Motor_forward(turn_pwm);
+
+	    uint32_t last_disp = 0;
+
+	    while (absf(yaw_deg) < target_deg)
+	    {
+	        uint32_t now = HAL_GetTick();
+	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
+	        yaw_t_prev_ms = now;
+
+	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
+
+	        yaw_deg += gz_dps * dt;
+
+	        // ===== OLED DISPLAY =====
+	        if (now - last_disp > 100)
+	        {
+	            last_disp = now;
+
+	            char l1[21], l2[21];
+
+	            snprintf(l1, sizeof(l1), "GZ:%4d dps", (int)gz_dps);
+	            snprintf(l2, sizeof(l2), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
+
+	            OLED_ShowString(0, 20, "                ");
+	            OLED_ShowString(0, 40, "                ");
+	            OLED_ShowString(0, 20, l1);
+	            OLED_ShowString(0, 40, l2);
+	            OLED_Refresh_Gram();
+	        }
+
+	        HAL_Delay(5);
+	    }
+
+	    Motor_stop();
+	    Servo_SetPWM(servo_straight);
+
+	    HAL_Delay(1500);
+	    Motor_stop();
+	}
+
+
+	void turn_right_gyro(float target_deg)
+	{
+	    yaw_deg = 0.0f;
+	    yaw_t_prev_ms = HAL_GetTick();
+
+	    Servo_SetPWM(servo_right);
+
+	    int turn_pwm = 1700;
+	    Motor_reverse(turn_pwm);
 
 	    uint32_t last_disp = 0;
 
@@ -921,11 +971,12 @@
 			      Motor_stop();
 
 			      OLED_Clear();
-			      OLED_ShowString(0, 0, "Turning left");
+			      OLED_ShowString(0, 0, "Turning right");
 			      OLED_ShowString(0, 20, "Target: 90 deg");
 			      OLED_Refresh_Gram();
 
-			      turn_left_gyro(90.0f);
+			      //turn_left_gyro(90.0f);
+			      turn_right_gyro(90.0f);
 
 			      OLED_Clear();
 			      OLED_ShowString(0, 0, "Turn done");
