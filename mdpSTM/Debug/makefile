@@ -60,8 +60,8 @@ all: main-build
 main-build: SC2104D-Lab5.elf secondary-outputs
 
 # Tool invocations
-SC2104D-Lab5.elf SC2104D-Lab5.map: $(OBJS) $(USER_OBJS) C:\Users\arunk\Desktop\Lab5(1)\SC2104D-Lab5\STM32F407VETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "SC2104D-Lab5.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\arunk\Desktop\Lab5(1)\SC2104D-Lab5\STM32F407VETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SC2104D-Lab5.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+SC2104D-Lab5.elf SC2104D-Lab5.map: $(OBJS) $(USER_OBJS) C:\Users\arunk\Desktop\mdpSTM\STM32F407VETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "SC2104D-Lab5.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\arunk\Desktop\mdpSTM\STM32F407VETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SC2104D-Lab5.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

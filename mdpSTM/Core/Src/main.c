@@ -18,7 +18,6 @@
 	/* USER CODE END Header */
 	/* Includes ------------------------------------------------------------------*/
 	#include "main.h"
-
 	/* Private includes ----------------------------------------------------------*/
 	/* USER CODE BEGIN Includes */
 	#include "oled.h"
@@ -80,6 +79,13 @@
 	//automatic iteration
 	uint32_t last_mode_tick = 0;
 	const uint32_t MODE_INTERVAL_MS = 600;  // 1 second
+
+	// ===== UART3 command receiver (newline-terminated) =====
+	static uint8_t  uart3_rx_ch;
+	static char     uart3_line[64];
+	static uint32_t uart3_idx = 0;
+	static volatile uint8_t uart3_line_ready = 0;
+
 
 	// Distance control variables
 	#define WHEEL_DIAMETER_CM 6.8436  // Measure your actual wheel diameter!
@@ -542,9 +548,9 @@
 
 	    Motor_stop();
 	    Servo_SetPWM(servo_straight);
-
-	    HAL_Delay(1500);
-	    Motor_stop();
+//
+//	    HAL_Delay(1500);
+//	    Motor_stop();
 	}
 
 
@@ -596,6 +602,43 @@
 	    HAL_Delay(1500);
 	    Motor_stop();
 	}
+
+
+	void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+	{
+	    if (huart->Instance == USART3)
+	    {
+	    	HAL_UART_Transmit(&huart3, (uint8_t*)"*", 1, 10);
+
+	        char c = (char)uart3_rx_ch;
+
+	        if (!uart3_line_ready)
+	        {
+	            if (c == '\n' || c == '\r')
+	            {
+	                if (uart3_idx > 0) {
+	                    uart3_line[uart3_idx] = '\0';
+	                    uart3_line_ready = 1;
+	                }
+	                uart3_idx = 0;
+	            }
+	            else
+	            {
+	                if (uart3_idx < sizeof(uart3_line) - 1) {
+	                    uart3_line[uart3_idx++] = c;
+	                } else {
+	                    // overflow -> reset
+	                    uart3_idx = 0;
+	                }
+	            }
+	        }
+
+	        // re-arm RX
+	        HAL_UART_Receive_IT(&huart3, &uart3_rx_ch, 1);
+	    }
+	}
+
+
 
 
 
@@ -814,6 +857,46 @@
 	  * @brief  The application entry point.
 	  * @retval int
 	  */
+
+
+	void UART3_Poll_Line(void)
+		{
+		printf("here\n");
+		    uint8_t c;
+
+		    // Non-blocking poll (timeout = 0)
+		    if (HAL_UART_Receive(&huart3, &c, 1, 0) == HAL_OK)
+		    {
+		        if (!uart3_line_ready)
+		        {
+		            if (c == '\n' || c == '\r')
+		            {
+		            	printf("here2222\n");
+		                if (uart3_idx > 0)
+		                {
+		                	printf("here33333\n");
+		                    uart3_line[uart3_idx] = '\0';
+		                    uart3_line_ready = 1;   //FORCE READY HERE
+		                }
+		                uart3_idx = 0;
+		            }
+		            else
+		            {
+		                if (uart3_idx < sizeof(uart3_line) - 1)
+		                {
+		                    uart3_line[uart3_idx++] = c;
+		                }
+		                else
+		                {
+		                    uart3_idx = 0; // overflow protection
+		                }
+		            }
+		        }
+		    }
+		}
+
+
+
 	int main(void)
 	{
 	  /* USER CODE BEGIN 1 */
@@ -872,6 +955,8 @@
 	  OLED_ShowString(10,50, oled_buf); //another message at line 50
 	  imu_ready = icm_init_minimal();
 	  gyro_calibrate_bias();
+	  HAL_UART_Receive_IT(&huart3, &uart3_rx_ch, 1);
+
 
 	  uint8_t sbuf[] = "SC2104\n\r";  // send to serial port
 	  HAL_UART_Transmit(&huart3, sbuf, sizeof(sbuf), HAL_MAX_DELAY); // Send through Serial Port @115200
@@ -952,38 +1037,109 @@
 //		      Apply_Mode(mode);
 //		  }
 
+
 		  while (1) {
-			  do_left_turn = 1;
 
-			  static uint32_t last_oled_ms = 0;
-			  uint32_t now_ms = HAL_GetTick();
+			    // Debug: Send heartbeat every 2 seconds
+			    static uint32_t last_heartbeat = 0;
+			    uint32_t now = HAL_GetTick();
 
-			  if (now_ms - last_oled_ms > 200) {   // update 5 times/sec
-			      last_oled_ms = now_ms;
-			      OLED_ShowGyro();
+			    if (now - last_heartbeat > 2000) {
+			        last_heartbeat = now;
+			        HAL_UART_Transmit(&huart3, (uint8_t*)"beforeif\r\n", 11, HAL_MAX_DELAY);
+			    }
+
+//			    static uint8_t forced_once = 0;
+//			    if (!forced_once) {
+//			        forced_once = 1;
+//
+//			        strcpy(uart3_line, "OLED:FORCED TEST");
+//			        //uart3_line_ready = 1;
+//			    }
+
+			    //UART3_Poll_Line();
+
+			  if (uart3_line_ready)
+			  {
+
+			      uart3_line_ready = 0;
+
+
+			      HAL_UART_Transmit(&huart3, (uint8_t*)"CMD=[", 5, 10);
+			      HAL_UART_Transmit(&huart3, (uint8_t*)uart3_line, strlen(uart3_line), 10);
+			      HAL_UART_Transmit(&huart3, (uint8_t*)"]\r\n", 3, 10);
+
+			      // Example command: OLED:Hello world
+			      if (strncmp(uart3_line, "OLED:", 5) == 0)
+			      {
+			          const char *msg = uart3_line + 5;
+
+			          // Debug: Send what we're about to display
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"111111\r\n", 11, HAL_MAX_DELAY);
+			          char debug[80];
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"22222\r\n", 11, HAL_MAX_DELAY);
+			          snprintf(debug, sizeof(debug), "DEBUG: Displaying '%s'\r\n", msg);
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"33333\r\n", 11, HAL_MAX_DELAY);
+			          HAL_UART_Transmit(&huart3, (uint8_t*)debug, strlen(debug), HAL_MAX_DELAY);
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"44444\r\n", 11, HAL_MAX_DELAY);
+
+			          // Try to display on OLED
+			          OLED_Clear();
+			          OLED_ShowString(0, 0, "RPi says:");
+			          OLED_ShowString(0, 20, (char*)msg);
+			          OLED_Refresh_Gram();
+
+			          // Send acknowledgment
+			          const char *ack = "OK OLED\r\n";
+			          HAL_UART_Transmit(&huart3, (uint8_t*)ack, strlen(ack), HAL_MAX_DELAY);
+			      }
+			      else if (strcmp(uart3_line, "TURNL90") == 0)
+			      {
+			          turn_left_gyro(90.0f);
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"OK TURNL90\r\n", 12, HAL_MAX_DELAY);
+			      }
+			      else if (strcmp(uart3_line, "TURNR90") == 0)
+			      {
+			          turn_right_gyro(90.0f);
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"OK TURNR90\r\n", 12, HAL_MAX_DELAY);
+			      }
+			      else
+			      {
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"ERR Unknown cmd\r\n", 17, HAL_MAX_DELAY);
+			      }
 			  }
 
+//			  do_left_turn = 1;
+//
+//			  static uint32_t last_oled_ms = 0;
+//			  uint32_t now_ms = HAL_GetTick();
+//
+//			  if (now_ms - last_oled_ms > 200) {   // update 5 times/sec
+//			      last_oled_ms = now_ms;
+//			      OLED_ShowGyro();
+//			  }
 
-			  if (do_left_turn) {
-			      do_left_turn = 0;
 
-			      motor_running = 0;
-			      Motor_stop();
-
-			      OLED_Clear();
-			      OLED_ShowString(0, 0, "Turning right");
-			      OLED_ShowString(0, 20, "Target: 90 deg");
-			      OLED_Refresh_Gram();
-
-			      //turn_left_gyro(90.0f);
-			      turn_right_gyro(90.0f);
-
-			      OLED_Clear();
-			      OLED_ShowString(0, 0, "Turn done");
-			      OLED_Refresh_Gram();
-
-			      motor_running = 1;
-			  }
+//			  if (do_left_turn) {
+//			      do_left_turn = 0;
+//
+//			      motor_running = 0;
+//			      Motor_stop();
+//
+//			      OLED_Clear();
+//			      OLED_ShowString(0, 0, "Turning right");
+//			      OLED_ShowString(0, 20, "Target: 90 deg");
+//			      OLED_Refresh_Gram();
+//
+//			      //turn_left_gyro(90.0f);
+//			      turn_right_gyro(90.0f);
+//
+//			      OLED_Clear();
+//			      OLED_ShowString(0, 0, "Turn done");
+//			      OLED_Refresh_Gram();
+//
+//			      motor_running = 1;
+//			  }
 
 		      // Check if distance movement is complete
 		      if (distance_mode == 1) {
