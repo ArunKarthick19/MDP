@@ -62,13 +62,16 @@
 	float motor_A_speed_factor = 0.3;  // ADD THIS LINE - start with same as D, then tune
 
 	// For 1ms-2ms pulse width (standard servo)
-	int32_t servo_left = 1000;     // 1.0ms = right (0°)
-	int32_t servo_left2 = 1150;     // 1.0ms = right (0°)
+	// Add near your other servo variables at the top
+	int32_t servo_revl = 900;  // tune this value for revl tightness
+	int32_t servo_left = 600;     // 1.0ms = right (0°)
+	int32_t servo_left2 = 1000;     // 1.0ms = right (0°)
 	int32_t servo_left1 = 1300;     // 1.0ms = right (0°)
 	int32_t servo_straight = 1500;  // 1.5ms = center (90°)
 	int32_t servo_right1 = 1700;      // 2.0ms = left (180°)
 	int32_t servo_right2 = 1850;      // 2.0ms = left (180°)
-	int32_t servo_right = 2000;      // 2.0ms = left (180°)
+	int32_t servo_right = 2150;
+	int32_t servo_revr = 2160;// 2.0ms = left (180°)
 	int32_t servo_current = 1500;    // Current servo position
 	int16_t servo_angle = 90;      // Current servo angle (0-180 degrees)
 
@@ -441,10 +444,8 @@
 //	}
 	void Servo_SetPWM(int32_t us)
 	{
-	    // TIM12 configured so 1 tick = 1us (PSC=71), period = 20ms (ARR=19999)
-	    // Typical servo: 1000us to 2000us, center 1500us
-	    if (us < 1000) us = 1000;
-	    if (us > 2000) us = 2000;
+	    if (us < 600) us = 600;
+	    if (us > 2400) us = 2400;
 
 	    __HAL_TIM_SetCompare(&htim12, TIM_CHANNEL_1, us);
 	    servo_current = us;
@@ -480,17 +481,28 @@
 			__HAL_TIM_SetCompare(&htim1,TIM_CHANNEL_4,0); // set IN2 to maximum PWM (7199) for '1' for Drive D
 		}
 	}
-
+	/**
+	 * Drive both motors together.
+	 *   dir = 0  -> forward  (same as main loop motor_direction==0)
+	 *   dir = 1  -> reverse
+	 */
+	void drive_both(int pwm_A, int pwm_D, uint8_t dir)
+	{
+	    if (dir == 0) {
+	        Motor_reverse(pwm_A);
+	        MotorD_reverse(pwm_D);
+	    } else {
+	        Motor_forward(pwm_A);
+	        MotorD_forward(pwm_D);
+	    }
+	}
 	void Motor_forward(int  pwmVal){
-		 // rotate motor in clockwise forward send the values to serial port for display
-		 Motor_direction(1); //forward
-		 __HAL_TIM_SetCompare(&htim4,TIM_CHANNEL_4,pwmVal); // output PWM waveform to drive motor A
-		 __HAL_TIM_SetCompare(&htim1,TIM_CHANNEL_4,pwmVal); // output PWM waveform to drive motor D - for debugging
-		 //__HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, pwmVal);  // C IN2 pwm
+		__HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, 0);
+		__HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_4, pwmVal);
 
-//		sprintf(buf, "PWM = %4dF ", pwmVal);
-//		OLED_ShowString(0, 20, buf);
-		//OLED_Refresh_Gram();
+		// Motor D: forward (swap CH3/CH4)
+		__HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_3, 0);
+		__HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, pwmVal);
 	}
 
 	void Motor_forward_forreverse(int pwmVal){
@@ -526,104 +538,7 @@
 		//OLED_Refresh_Gram();
 	}
 
-	void turn_left_gyro(float target_deg)
-	{
-	    yaw_deg = 0.0f;
-	    yaw_t_prev_ms = HAL_GetTick();
 
-	    Servo_SetPWM(servo_left);
-
-	    int turn_pwm = 1700;
-	    Motor_forward(turn_pwm);
-
-	    uint32_t last_disp = 0;
-
-	    while (absf(yaw_deg) < target_deg)
-	    {
-	        uint32_t now = HAL_GetTick();
-	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
-	        yaw_t_prev_ms = now;
-
-	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
-
-	        yaw_deg += gz_dps * dt;
-
-	        // ===== OLED DISPLAY =====
-	        if (now - last_disp > 100)
-	        {
-	            last_disp = now;
-
-	            char l1[21], l2[21];
-
-	            snprintf(l1, sizeof(l1), "GZ:%4d dps", (int)gz_dps);
-	            snprintf(l2, sizeof(l2), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
-
-	            OLED_ShowString(0, 20, "                ");
-	            OLED_ShowString(0, 40, "                ");
-	            OLED_ShowString(0, 20, l1);
-	            OLED_ShowString(0, 40, l2);
-	            OLED_Refresh_Gram();
-	        }
-
-	        HAL_Delay(5);
-	    }
-
-	    Motor_stop();
-	    Servo_SetPWM(servo_straight);
-//
-//	    HAL_Delay(1500);
-//	    Motor_stop();
-	}
-
-
-	void turn_right_gyro(float target_deg)
-	{
-	    yaw_deg = 0.0f;
-	    yaw_t_prev_ms = HAL_GetTick();
-
-	    Servo_SetPWM(servo_right);
-
-	    int turn_pwm = 1700;
-	    Motor_reverse(turn_pwm);
-
-	    uint32_t last_disp = 0;
-
-	    while (absf(yaw_deg) < target_deg)
-	    {
-	        uint32_t now = HAL_GetTick();
-	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
-	        yaw_t_prev_ms = now;
-
-	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
-
-	        yaw_deg += gz_dps * dt;
-
-	        // ===== OLED DISPLAY =====
-	        if (now - last_disp > 100)
-	        {
-	            last_disp = now;
-
-	            char l1[21], l2[21];
-
-	            snprintf(l1, sizeof(l1), "GZ:%4d dps", (int)gz_dps);
-	            snprintf(l2, sizeof(l2), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
-
-	            OLED_ShowString(0, 20, "                ");
-	            OLED_ShowString(0, 40, "                ");
-	            OLED_ShowString(0, 20, l1);
-	            OLED_ShowString(0, 40, l2);
-	            OLED_Refresh_Gram();
-	        }
-
-	        HAL_Delay(5);
-	    }
-
-	    Motor_stop();
-	    Servo_SetPWM(servo_straight);
-
-	    HAL_Delay(1500);
-	    Motor_stop();
-	}
 
 
 	void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -728,6 +643,233 @@
 	/* USER CODE BEGIN 0 */
 	// ... existing code ...
 
+	static float gz_filtered = 0.0f;
+
+	static float get_gz_filtered_dps(void)
+	{
+	    float gz = icm_get_gz_dps() - gyro_z_bias_dps;
+	    gz_filtered = 0.8f * gz_filtered + 0.2f * gz;
+	    return gz_filtered;
+	}
+
+	static void gyro_rebias_quick(void)
+	{
+	    const int N = 80;
+	    float sum = 0.0f;
+
+	    for (int i = 0; i < N; i++) {
+	        sum += icm_get_gz_dps();
+	        HAL_Delay(2);
+	    }
+
+	    gyro_z_bias_dps = sum / (float)N;
+	    gz_filtered = 0.0f;
+	}
+
+	static void reset_turn_encoders(void)
+	{
+	    TIM2->CNT = 0;
+	    TIM5->CNT = 0;
+	}
+
+	static int32_t get_enc_a(void)
+	{
+	    return (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+	}
+
+	static int32_t get_enc_d(void)
+	{
+	    return (int16_t)__HAL_TIM_GET_COUNTER(&htim5);
+	}
+
+	void turn_left_gyro_fused(float target_deg)
+	{
+	    Motor_stop();
+	    HAL_Delay(200);
+
+	    gyro_rebias_quick();
+	    reset_turn_encoders();
+
+	    yaw_deg = 0.0f;
+	    yaw_t_prev_ms = HAL_GetTick();
+
+	    Servo_SetPWM(servo_left2);
+
+	    int base_outer = 1300;
+	    int base_inner = 700;
+
+	    const float enc_k = 1.5f;     // tune: 0.5 to 3.0
+	    const int pwm_min = 350;
+	    const int pwm_max = 1600;
+
+	    uint32_t last_disp = 0;
+	    uint32_t timeout_start = HAL_GetTick();
+
+	    while (absf(yaw_deg) < target_deg)
+	    {
+	        if (HAL_GetTick() - timeout_start > 5000) break;
+
+	        uint32_t now = HAL_GetTick();
+	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
+	        if (dt < 0.001f) dt = 0.001f;
+	        if (dt > 0.02f)  dt = 0.02f;
+	        yaw_t_prev_ms = now;
+
+	        float gz_dps = get_gz_filtered_dps();
+	        yaw_deg += gz_dps * dt;
+
+	        float remaining = target_deg - absf(yaw_deg);
+
+	        int outer_pwm = base_outer;
+	        int inner_pwm = base_inner;
+
+	        // slow down near target
+	        if (remaining < 20.0f) {
+	            outer_pwm = 900;
+	            inner_pwm = 500;
+	        }
+	        if (remaining < 8.0f) {
+	            outer_pwm = 650;
+	            inner_pwm = 350;
+	        }
+
+	        // encoder correction
+	        int32_t encA = get_enc_a();
+	        int32_t encD = get_enc_d();
+
+	        // For left turn: D is outer wheel, A is inner wheel
+	        int32_t enc_err = encD - encA;
+
+	        int corr = (int)(enc_k * enc_err);
+
+	        int pwmA = inner_pwm + corr;
+	        int pwmD = outer_pwm - corr;
+
+	        if (pwmA < pwm_min) pwmA = pwm_min;
+	        if (pwmA > pwm_max) pwmA = pwm_max;
+	        if (pwmD < pwm_min) pwmD = pwm_min;
+	        if (pwmD > pwm_max) pwmD = pwm_max;
+
+	        drive_both(pwmA, pwmD, 0);
+
+	        if (now - last_disp > 100)
+	        {
+	            last_disp = now;
+	            char l1[21], l2[21], l3[21];
+	            snprintf(l1, sizeof(l1), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
+	            snprintf(l2, sizeof(l2), "A:%4ld D:%4ld", (long)encA, (long)encD);
+	            snprintf(l3, sizeof(l3), "PA:%4d PD:%4d", pwmA, pwmD);
+
+	            OLED_Clear();
+	            OLED_ShowString(0, 0, "TURN LEFT");
+	            OLED_ShowString(0, 20, l1);
+	            OLED_ShowString(0, 40, l2);
+	            OLED_ShowString(0, 55, l3);
+	            OLED_Refresh_Gram();
+	        }
+
+	        HAL_Delay(2);
+	    }
+
+	    Motor_stop();
+	    HAL_Delay(120);
+	    Servo_SetPWM(servo_straight);
+	    HAL_Delay(150);
+	}
+
+	void turn_right_gyro_fused(float target_deg)
+	{
+	    Motor_stop();
+	    HAL_Delay(200);
+
+	    gyro_rebias_quick();
+	    reset_turn_encoders();
+
+	    yaw_deg = 0.0f;
+	    yaw_t_prev_ms = HAL_GetTick();
+
+	    Servo_SetPWM(servo_right);
+
+	    int base_outer = 1300;
+	    int base_inner = 700;
+
+	    const float enc_k = 1.5f;
+	    const int pwm_min = 350;
+	    const int pwm_max = 1600;
+
+	    uint32_t last_disp = 0;
+	    uint32_t timeout_start = HAL_GetTick();
+
+	    while (absf(yaw_deg) < target_deg)
+	    {
+	        if (HAL_GetTick() - timeout_start > 5000) break;
+
+	        uint32_t now = HAL_GetTick();
+	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
+	        if (dt < 0.001f) dt = 0.001f;
+	        if (dt > 0.02f)  dt = 0.02f;
+	        yaw_t_prev_ms = now;
+
+	        float gz_dps = get_gz_filtered_dps();
+	        yaw_deg += gz_dps * dt;
+
+	        float remaining = target_deg - absf(yaw_deg);
+
+	        int outer_pwm = base_outer;
+	        int inner_pwm = base_inner;
+
+	        if (remaining < 20.0f) {
+	            outer_pwm = 900;
+	            inner_pwm = 500;
+	        }
+	        if (remaining < 8.0f) {
+	            outer_pwm = 650;
+	            inner_pwm = 350;
+	        }
+
+	        // For right turn: A is outer wheel, D is inner wheel
+	        int32_t encA = get_enc_a();
+	        int32_t encD = get_enc_d();
+
+	        int32_t enc_err = encA - encD;
+
+	        int corr = (int)(enc_k * enc_err);
+
+	        int pwmA = outer_pwm - corr;
+	        int pwmD = inner_pwm + corr;
+
+	        if (pwmA < pwm_min) pwmA = pwm_min;
+	        if (pwmA > pwm_max) pwmA = pwm_max;
+	        if (pwmD < pwm_min) pwmD = pwm_min;
+	        if (pwmD > pwm_max) pwmD = pwm_max;
+
+	        drive_both(pwmA, pwmD, 0);
+
+	        if (now - last_disp > 100)
+	        {
+	            last_disp = now;
+	            char l1[21], l2[21], l3[21];
+	            snprintf(l1, sizeof(l1), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
+	            snprintf(l2, sizeof(l2), "A:%4ld D:%4ld", (long)encA, (long)encD);
+	            snprintf(l3, sizeof(l3), "PA:%4d PD:%4d", pwmA, pwmD);
+
+	            OLED_Clear();
+	            OLED_ShowString(0, 0, "TURN RIGHT");
+	            OLED_ShowString(0, 20, l1);
+	            OLED_ShowString(0, 40, l2);
+	            OLED_ShowString(0, 55, l3);
+	            OLED_Refresh_Gram();
+	        }
+
+	        HAL_Delay(2);
+	    }
+
+	    Motor_stop();
+	    HAL_Delay(120);
+	    Servo_SetPWM(servo_straight);
+	    HAL_Delay(150);
+	}
+
 	void fwd(int distance_cm) {
 	    // Convert cm to encoder counts
 		 distance_target_counts = (int32_t)((distance_cm / CM_PER_COUNT) * 1.495);
@@ -784,19 +926,98 @@
 	}
 
 
-	void revr(float target_deg)
+	void turn_left_gyro(float target_deg)
 	{
+	    yaw_deg = 0.0f;
+	    yaw_t_prev_ms = HAL_GetTick();
+	    //target_deg = target_deg-3;
+	    Servo_SetPWM(servo_left2);
 
+	    int outer_pwm = 1400;  // right wheel (D) = outer, faster
+	    int inner_pwm = 500;   // left wheel (A) = inner, slower
+
+	    uint32_t last_disp = 0;
+
+	    while (absf(yaw_deg) < target_deg)
+	    {
+	        uint32_t now = HAL_GetTick();
+	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
+	        yaw_t_prev_ms = now;
+
+	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
+	        yaw_deg += gz_dps * dt;
+
+	        drive_both(inner_pwm, outer_pwm, 0);  // A=inner(slow), D=outer(fast)
+
+	        if (now - last_disp > 100)
+	        {
+	            last_disp = now;
+	            char l1[21], l2[21];
+	            snprintf(l1, sizeof(l1), "GZ:%4d dps", (int)gz_dps);
+	            snprintf(l2, sizeof(l2), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
+	            OLED_ShowString(0, 20, "                ");
+	            OLED_ShowString(0, 40, "                ");
+	            OLED_ShowString(0, 20, l1);
+	            OLED_ShowString(0, 40, l2);
+	            OLED_Refresh_Gram();
+	        }
+	        HAL_Delay(5);
+	    }
+
+	    Motor_stop();
+	    Servo_SetPWM(servo_straight);
+	}
+
+	void turn_right_gyro(float target_deg)
+	{
 	    yaw_deg = 0.0f;
 	    yaw_t_prev_ms = HAL_GetTick();
 
 	    Servo_SetPWM(servo_right);
 
-	    int turn_pwm = 1000;
+	    int outer_pwm = 1400;  // left wheel (A) = outer, faster
+	    int inner_pwm = 500;   // right wheel (D) = inner, slower
 
-	    // Motor_reverse drives BOTH Motor A and Motor D backward
-	    Motor_forward_forreverse(turn_pwm);
+	    uint32_t last_disp = 0;
 
+	    while (absf(yaw_deg) < target_deg)
+	    {
+	        uint32_t now = HAL_GetTick();
+	        float dt = (now - yaw_t_prev_ms) / 1000.0f;
+	        yaw_t_prev_ms = now;
+
+	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
+	        yaw_deg += gz_dps * dt;
+
+	        drive_both(outer_pwm, inner_pwm, 0);  // A=outer(fast), D=inner(slow)
+
+	        if (now - last_disp > 100)
+	        {
+	            last_disp = now;
+	            char l1[21], l2[21];
+	            snprintf(l1, sizeof(l1), "GZ:%4d dps", (int)gz_dps);
+	            snprintf(l2, sizeof(l2), "Yaw:%3d/%3d", (int)yaw_deg, (int)target_deg);
+	            OLED_ShowString(0, 20, "                ");
+	            OLED_ShowString(0, 40, "                ");
+	            OLED_ShowString(0, 20, l1);
+	            OLED_ShowString(0, 40, l2);
+	            OLED_Refresh_Gram();
+	        }
+	        HAL_Delay(5);
+	    }
+
+	    Motor_stop();
+	    Servo_SetPWM(servo_straight);
+	}
+
+	void revr(float target_deg)
+	{
+	    yaw_deg = 0.0f;
+	    yaw_t_prev_ms = HAL_GetTick();
+
+	    Servo_SetPWM(servo_revr);  // opposite servo for reverse arc
+	    int outer_pwm = 1100;  // left wheel (A) = outer, faster
+		int inner_pwm = 600;   // right wheel (D) = inner, slower
 	    uint32_t last_disp = 0;
 	    uint32_t timeout_start = HAL_GetTick();
 
@@ -812,8 +1033,7 @@
 	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
 	        yaw_deg += gz_dps * dt;
 
-	        // Re-apply motor command to prevent PID/other overwriting
-	        Motor_forward_forreverse(turn_pwm);
+	        drive_both(outer_pwm, inner_pwm, 1);  // both motors reverse
 
 	        if (now - last_disp > 100)
 	        {
@@ -827,27 +1047,23 @@
 	            OLED_ShowString(0, 40, l2);
 	            OLED_Refresh_Gram();
 	        }
-
 	        HAL_Delay(5);
 	    }
 
 	    Motor_stop();
-	    Servo_SetPWM(servo_straight);
-	    HAL_Delay(500);
+	        Servo_SetPWM(servo_straight);
+	        HAL_Delay(500);
 	}
 
 	void revl(float target_deg)
 	{
-
 	    yaw_deg = 0.0f;
 	    yaw_t_prev_ms = HAL_GetTick();
+	    //target_deg = target_deg-3;
 
-	    Servo_SetPWM(servo_left);
-
-	    int turn_pwm = 1700;
-
-	    Motor_reverse_forreverse(turn_pwm);
-
+	    Servo_SetPWM(servo_revl);  // opposite servo for reverse arc
+	    int outer_pwm = 1100;  // right wheel (D) = outer, faster
+		int inner_pwm = 600;   // left wheel (A) = inner, slower
 	    uint32_t last_disp = 0;
 	    uint32_t timeout_start = HAL_GetTick();
 
@@ -863,7 +1079,7 @@
 	        float gz_dps = icm_get_gz_dps() - gyro_z_bias_dps;
 	        yaw_deg += gz_dps * dt;
 
-	        Motor_reverse_forreverse(turn_pwm);
+	        drive_both(outer_pwm, inner_pwm, 1);  // both motors reverse
 
 	        if (now - last_disp > 100)
 	        {
@@ -877,7 +1093,6 @@
 	            OLED_ShowString(0, 40, l2);
 	            OLED_Refresh_Gram();
 	        }
-
 	        HAL_Delay(5);
 	    }
 
@@ -885,6 +1100,11 @@
 	    Servo_SetPWM(servo_straight);
 	    HAL_Delay(500);
 	}
+
+
+
+
+
 
 	int check_distance_complete() {
 	    if (distance_mode == 0) return 1; // Not in distance mode
@@ -1192,12 +1412,13 @@
 			    static uint32_t last_heartbeat = 0;
 			    uint32_t now = HAL_GetTick();
 
-			    if (now - last_heartbeat > 2000) {
-			        last_heartbeat = now;
-			        HAL_UART_Transmit(&huart3, (uint8_t*)"beforeif\r\n", 11, HAL_MAX_DELAY);
-			    }
+//			    if (now - last_heartbeat > 2000) {
+//			        last_heartbeat = now;
+//			        HAL_UART_Transmit(&huart3, (uint8_t*)"beforeif\r\n", 11, HAL_MAX_DELAY);
+//			    }
 
 //			    static uint8_t forced_once = 0;
+
 //			    if (!forced_once) {
 //			        forced_once = 1;
 //
@@ -1223,13 +1444,13 @@
 			          const char *msg = uart3_line + 5;
 
 			          // Debug: Send what we're about to display
-			          HAL_UART_Transmit(&huart3, (uint8_t*)"111111\r\n", 11, HAL_MAX_DELAY);
+			          //HAL_UART_Transmit(&huart3, (uint8_t*)"111111\r\n", 11, HAL_MAX_DELAY);
 			          char debug[80];
-			          HAL_UART_Transmit(&huart3, (uint8_t*)"22222\r\n", 11, HAL_MAX_DELAY);
+			          //HAL_UART_Transmit(&huart3, (uint8_t*)"22222\r\n", 11, HAL_MAX_DELAY);
 			          snprintf(debug, sizeof(debug), "DEBUG: Displaying '%s'\r\n", msg);
-			          HAL_UART_Transmit(&huart3, (uint8_t*)"33333\r\n", 11, HAL_MAX_DELAY);
-			          HAL_UART_Transmit(&huart3, (uint8_t*)debug, strlen(debug), HAL_MAX_DELAY);
-			          HAL_UART_Transmit(&huart3, (uint8_t*)"44444\r\n", 11, HAL_MAX_DELAY);
+			          //HAL_UART_Transmit(&huart3, (uint8_t*)"33333\r\n", 11, HAL_MAX_DELAY);
+			          //HAL_UART_Transmit(&huart3, (uint8_t*)debug, strlen(debug), HAL_MAX_DELAY);
+			          //HAL_UART_Transmit(&huart3, (uint8_t*)"44444\r\n", 11, HAL_MAX_DELAY);
 
 			          // Try to display on OLED
 			          OLED_Clear();
@@ -1390,7 +1611,7 @@
 			  error = target_angle - angle; // calculate the error
 			  }
 
-		  serial_uart(); // send the various data to the serial port for display
+		  //serial_uart(); // send the various data to the serial port for display
 
 		  if (err > 5) { // error has settled to within the acceptance ranges
 		          // Optional: Add buzzer feedback when target reached
