@@ -63,15 +63,15 @@
 
 	// For 1ms-2ms pulse width (standard servo)
 	// Add near your other servo variables at the top
-	int32_t servo_revl = 900;  // tune this value for revl tightness
-	int32_t servo_left = 600;     // 1.0ms = right (0°)
-	int32_t servo_left2 = 1000;     // 1.0ms = right (0°)
+	int32_t servo_revl = 950;  // tune this value for revl tightness
+	int32_t servo_left = 720;     // 1.0ms = right (0°)
+	int32_t servo_left2 = 940;     // 1.0ms = right (0°) //1010
 	int32_t servo_left1 = 1300;     // 1.0ms = right (0°)
 	int32_t servo_straight = 1500;  // 1.5ms = center (90°)
 	int32_t servo_right1 = 1700;      // 2.0ms = left (180°)
 	int32_t servo_right2 = 1850;      // 2.0ms = left (180°)
-	int32_t servo_right = 2150;
-	int32_t servo_revr = 2160;// 2.0ms = left (180°)
+	int32_t servo_right = 2250;//2050
+	int32_t servo_revr = 2150;// 2.0ms = left (180°)
 	int32_t servo_current = 1500;    // Current servo position
 	int16_t servo_angle = 90;      // Current servo angle (0-180 degrees)
 
@@ -384,6 +384,23 @@
 //				start = 0;
 //			}
 //	}
+	void Motor_brake(void)
+	{
+	    // Read current direction, apply opposite briefly
+	    if (motor_direction == 0) {
+	        // Was going forward, pulse reverse
+	        Motor_forward(1500);   // your "forward" is actually reverse in your wiring
+	        MotorD_forward(1500);
+	    } else {
+	        // Was going reverse, pulse forward
+	        Motor_reverse(1500);
+	        MotorD_reverse(1500);
+	    }
+	    HAL_Delay(60);    // short reverse pulse — tune 40-80ms
+
+	    // Now coast to zero
+	    Motor_stop();
+	}
 
 	void MotorDrive_enable(void) {
 		  //Enable PWM through TIM4-CH1/CH4 to drive the DC motor - Rev D board
@@ -928,13 +945,17 @@
 
 	void turn_left_gyro(float target_deg)
 	{
+		Motor_stop();
+		    HAL_Delay(150);
+		    gyro_rebias_quick();
+		    gz_filtered = 0.0f;
 	    yaw_deg = 0.0f;
 	    yaw_t_prev_ms = HAL_GetTick();
 	    //target_deg = target_deg-3;
 	    Servo_SetPWM(servo_left2);
 
-	    int outer_pwm = 1400;  // right wheel (D) = outer, faster
-	    int inner_pwm = 500;   // left wheel (A) = inner, slower
+	    int outer_pwm = 1500;  // right wheel (D) = outer, faster
+	    int inner_pwm = 450;   // left wheel (A) = inner, slower
 
 	    uint32_t last_disp = 0;
 
@@ -964,19 +985,23 @@
 	        HAL_Delay(5);
 	    }
 
-	    Motor_stop();
+	    Motor_brake();
 	    Servo_SetPWM(servo_straight);
 	}
 
 	void turn_right_gyro(float target_deg)
 	{
+		Motor_stop();
+		    HAL_Delay(150);
+		    gyro_rebias_quick();
+		    gz_filtered = 0.0f;
 	    yaw_deg = 0.0f;
 	    yaw_t_prev_ms = HAL_GetTick();
 
 	    Servo_SetPWM(servo_right);
 
-	    int outer_pwm = 1400;  // left wheel (A) = outer, faster
-	    int inner_pwm = 500;   // right wheel (D) = inner, slower
+	    int outer_pwm = 1500;  // left wheel (A) = outer, faster
+	    int inner_pwm = 450;   // right wheel (D) = inner, slower
 
 	    uint32_t last_disp = 0;
 
@@ -1006,12 +1031,16 @@
 	        HAL_Delay(5);
 	    }
 
-	    Motor_stop();
+	    Motor_brake();
 	    Servo_SetPWM(servo_straight);
 	}
 
 	void revr(float target_deg)
 	{
+		Motor_stop();
+		    HAL_Delay(150);
+		    gyro_rebias_quick();
+		    gz_filtered = 0.0f;
 	    yaw_deg = 0.0f;
 	    yaw_t_prev_ms = HAL_GetTick();
 
@@ -1050,13 +1079,17 @@
 	        HAL_Delay(5);
 	    }
 
-	    Motor_stop();
+	    Motor_brake();
 	        Servo_SetPWM(servo_straight);
 	        HAL_Delay(500);
 	}
 
 	void revl(float target_deg)
 	{
+		Motor_stop();
+		    HAL_Delay(150);
+		    gyro_rebias_quick();
+		    gz_filtered = 0.0f;
 	    yaw_deg = 0.0f;
 	    yaw_t_prev_ms = HAL_GetTick();
 	    //target_deg = target_deg-3;
@@ -1096,7 +1129,7 @@
 	        HAL_Delay(5);
 	    }
 
-	    Motor_stop();
+	    Motor_brake();
 	    Servo_SetPWM(servo_straight);
 	    HAL_Delay(500);
 	}
@@ -1113,7 +1146,7 @@
 
 	    if (distance_traveled >= distance_target_counts) {
 	        // Target reached!
-	        Motor_stop();
+	    	Motor_brake();
 	        distance_mode = 0;
 	        motor_running = 0;
 
@@ -1465,12 +1498,14 @@
 			      else if (strncmp(uart3_line, "TURNL:", 6) == 0)
 				  {
 					  int deg = atoi(uart3_line + 6);
+					  HAL_Delay(700);
 					  turn_left_gyro((float)deg);
 					  HAL_UART_Transmit(&huart3, (uint8_t*)"OK TURNL\r\n", 10, HAL_MAX_DELAY);
 				  }
 				  else if (strncmp(uart3_line, "TURNR:", 6) == 0)
 				  {
 					  int deg = atoi(uart3_line + 6);
+					  HAL_Delay(700);
 					  turn_right_gyro((float)deg);
 					  HAL_UART_Transmit(&huart3, (uint8_t*)"OK TURNR\r\n", 10, HAL_MAX_DELAY);
 				  }
@@ -1483,20 +1518,24 @@
 			      else if (strncmp(uart3_line, "REV:", 4) == 0)
 				  {
 					  int cm = atoi(uart3_line + 4);
+					  HAL_Delay(700);
 					  rev(cm);
 					  //HAL_UART_Transmit(&huart3, (uint8_t*)"OK REV\r\n", 8, HAL_MAX_DELAY);
 				  }
 				  else if (strncmp(uart3_line, "REVL:", 5) == 0)
 				  {
 					  int cm = atoi(uart3_line + 5);
+					  HAL_Delay(700);
 					  revl(cm);
-					  HAL_UART_Transmit(&huart3, (uint8_t*)"OK REVL\r\n", 9, HAL_MAX_DELAY);
+					  rev(2);
+					  //HAL_UART_Transmit(&huart3, (uint8_t*)"OK REVL\r\n", 9, HAL_MAX_DELAY);
 				  }
 				  else if (strncmp(uart3_line, "REVR:", 5) == 0)
 				  {
 					  int cm = atoi(uart3_line + 5);
 					  revr(cm);
-					  HAL_UART_Transmit(&huart3, (uint8_t*)"OK REVR\r\n", 9, HAL_MAX_DELAY);
+					  rev(2);
+					  //HAL_UART_Transmit(&huart3, (uint8_t*)"OK REVR\r\n", 9, HAL_MAX_DELAY);
 				  }
 			      else
 			      {
