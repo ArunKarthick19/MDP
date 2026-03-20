@@ -99,6 +99,8 @@ UART_HandleTypeDef huart3;
 #define IR_VALID_MAX_CM          80.0f   // above 80 = garbage
 #define IR_VALID_MAX_CM_parking          120.0f   // above 80 = garbage
 
+	static uint32_t last_us_telem = 0;
+
 	static uint8_t obstacle_count = 0;  // 0 = waiting for obs1, 1 = waiting for obs2
 
 	static volatile uint8_t us_obstacle_stopped = 0;  // 1 = we paused due to obstacle
@@ -113,7 +115,7 @@ UART_HandleTypeDef huart3;
 	// For 1ms-2ms pulse width (standard servo)
 	int32_t servo_revl = 980;  // tune this value for revl tightness
 	int32_t servo_left2 = 1000;     // 1.0ms = right (0°) //1010
-	int32_t servo_leftt2 = 1085;
+	int32_t servo_leftt2 = 1035;
 
 	int32_t servo_straight = 1500;  // 1.5ms = center (90°)
 	int32_t servo_right = 2275;//2050
@@ -135,7 +137,8 @@ UART_HandleTypeDef huart3;
 	static char     uart3_line[64];
 	static uint32_t uart3_idx = 0;
 	static volatile uint8_t uart3_line_ready = 0;
-
+	// Add near your other globals
+	static float v2_dist_cm = 0.0f;
 
 	// Distance control variables
 	#define WHEEL_DIAMETER_CM 6.8436  // Measure your actual wheel diameter!
@@ -159,7 +162,7 @@ UART_HandleTypeDef huart3;
 	#define GYRO_XOUT_H          0x33
 
 //IR range
-#define IR_CLEARED_THRESHOLD_CM  40.0f   // tune: when IR reads > this, obstacle is gone
+#define IR_CLEARED_THRESHOLD_CM  55.0f   // tune: when IR reads > this, obstacle is gone
 #define IR_VALID_MIN_CM          4.0f    // ignore garbage readings below this
 
 	static float ir_read_pa2(void) {
@@ -545,21 +548,23 @@ static void MX_TIM5_Init(void);
 	    Servo_SetPWM(servo_straight);
 	    distance_mode = 0;
 
-	    int32_t cruise_A = (int32_t)(5000 * motor_A_speed_factor);
-	    int32_t cruise_D = (int32_t)(5000 * motor_D_speed_factor);
+	    int32_t cruise_A = (int32_t)(4800 * motor_A_speed_factor);
+	    int32_t cruise_D = (int32_t)(4800 * motor_D_speed_factor);
 
 	    char dbg[40];
 	    snprintf(dbg, sizeof(dbg), "IR_V2 s=%d\r\n", sensor);
 	    HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
 
+	    // Reset encoders for distance tracking
+	    TIM2->CNT = 0;
+	    TIM5->CNT = 0;
+
 	    float ir_now = (sensor == 0) ? ir_read_pa2() : ir_read_pa3();
 
-	    // Phase 1: If we already see obstacle (valid close reading), skip to phase 2
 	    if (ir_now >= IR_VALID_MIN_CM && ir_now <= IR_CLEARED_THRESHOLD_CM) {
 	        snprintf(dbg, sizeof(dbg), "V2_ALREADY %.1f\r\n", ir_now);
 	        HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
 	    } else {
-	        // Drive forward until IR sees the obstacle (valid close reading)
 	        drive_both(cruise_A, cruise_D, 0);
 	        uint32_t timeout = HAL_GetTick();
 	        uint8_t found = 0;
@@ -583,8 +588,6 @@ static void MX_TIM5_Init(void);
 	        }
 	    }
 
-	    // Phase 2: Keep driving until obstacle clears (reads far/garbage = past it)
-	    // Phase 2: Keep driving until obstacle clears
 	    drive_both(cruise_A, cruise_D, 0);
 	    uint32_t timeout = HAL_GetTick();
 	    uint8_t clear_count = 0;
@@ -594,7 +597,7 @@ static void MX_TIM5_Init(void);
 
 	        if (ir > IR_CLEARED_THRESHOLD_CM || ir < IR_VALID_MIN_CM) {
 	            clear_count++;
-	            if (clear_count >= 3) {
+	            if (clear_count >= 8) {
 	                snprintf(dbg, sizeof(dbg), "V2_CLR %.1f\r\n", ir);
 	                HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
 	                break;
@@ -608,7 +611,14 @@ static void MX_TIM5_Init(void);
 	    Motor_brake();
 	    motor_running = 0;
 	    distance_mode = 0;
-	    HAL_UART_Transmit(&huart3, (uint8_t*)"V2_DONE\r\n", 9, 50);
+
+	    // Report distance traveled
+	    // Report distance traveled
+	    int32_t encA = abs((int16_t)TIM2->CNT);
+	    int32_t encD = abs((int16_t)TIM5->CNT);
+	    v2_dist_cm = ((encA + encD) / 2.0f) * CM_PER_COUNT / 2.325f;
+	    snprintf(dbg, sizeof(dbg), "V2_DIST:%.1f\r\n", v2_dist_cm);
+	    HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
 	}
 	// Drive forward (encoder-corrected via main loop) until IR sensor clears obstacle
 	// sensor: 0 = PA2 (left), 1 = PA3 (right)
@@ -623,8 +633,8 @@ static void MX_TIM5_Init(void);
 	    Servo_SetPWM(servo_straight);
 	    distance_mode = 0;
 
-	    int32_t cruise_A = (int32_t)(5300 * motor_A_speed_factor);
-	    int32_t cruise_D = (int32_t)(5300 * motor_D_speed_factor);
+	    int32_t cruise_A = (int32_t)(5000 * motor_A_speed_factor);
+	    int32_t cruise_D = (int32_t)(5000 * motor_D_speed_factor);
 
 	    char dbg[40];
 	    snprintf(dbg, sizeof(dbg), "IR_WAIT s=%d\r\n", sensor);
@@ -669,20 +679,27 @@ static void MX_TIM5_Init(void);
 	    }
 
 	    // Phase 2: Keep driving until obstacle clears (valid far reading)
+	    // Phase 2: Keep driving until obstacle clears (accept garbage as cleared too)
 	    drive_both(cruise_A, cruise_D, 0);
 	    uint32_t timeout = HAL_GetTick();
+	    uint8_t clear_count = 0;
 	    while (HAL_GetTick() - timeout < 15000) {
 	        HCSR04_ContinuousUpdate();
 	        float ir = (sensor == 0) ? ir_read_pa2() : ir_read_pa3();
-	        if (ir > IR_CLEARED_THRESHOLD_CM && ir < IR_VALID_MAX_CM) {
-	            snprintf(dbg, sizeof(dbg), "IR_CLR %.1f\r\n", ir);
-	            HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
-	            break;
+
+	        if (ir > IR_CLEARED_THRESHOLD_CM || ir < IR_VALID_MIN_CM) {
+	            clear_count++;
+	            if (clear_count >= 3) {
+	                snprintf(dbg, sizeof(dbg), "IR_CLR %.1f\r\n", ir);
+	                HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
+	                break;
+	            }
+	        } else {
+	            clear_count = 0;
 	        }
 	        drive_both(cruise_A, cruise_D, 0);
 	        HAL_Delay(10);
 	    }
-
 	    Motor_brake();
 	    motor_running = 0;
 	    distance_mode = 0;
@@ -1535,6 +1552,99 @@ const int slow_outer = 4500,  slow_inner = 2250;
 
 
 	}
+	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+		//USE OUTSIDE
+
+	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	void fwdt2(void) {
+	    if (obstacle_count == 0) {
+	        fwdt2_total_counts = 0;
+	    }
+
+	    // --- Pre-check: sample US a few times ---
+	    for (int i = 0; i < 5; i++) {
+	        HCSR04_Trigger();
+	        HAL_Delay(US_TRIGGER_INTERVAL_MS);
+	        float dist = HCSR04_ProcessCapture();
+	        if (dist > 0) us_live_distance_cm = dist;
+	    }
+
+	    char premsg[40];
+	    snprintf(premsg, sizeof(premsg), "FWD2_PRE:%.1f\r\n", us_live_distance_cm);
+	    HAL_UART_Transmit(&huart3, (uint8_t*)premsg, strlen(premsg), 50);
+
+	    // Only pre-stop if obstacle is within 15cm (unmistakably close)
+	    // Only pre-stop if obstacle is within 25cm (unmistakably close)
+	    if (us_live_distance_cm > 0 && us_live_distance_cm <= 25.0f) {
+
+	        // Too close? Back up so camera can see the image
+	        if (us_live_distance_cm < 25.0f) {
+	            int backup_cm = (int)(25.0f - us_live_distance_cm);
+	            if (backup_cm < 1) backup_cm = 1;
+
+	            char rmsg[30];
+	            snprintf(rmsg, sizeof(rmsg), "FWD2_REV:%d\r\n", backup_cm);
+	            HAL_UART_Transmit(&huart3, (uint8_t*)rmsg, strlen(rmsg), 50);
+
+	            rev(backup_cm);
+	            while (distance_mode == 1) {
+	                HCSR04_ContinuousUpdate();
+	                int32_t cruise_A = (int32_t)(5000 * motor_A_speed_factor);
+	                int32_t cruise_D = (int32_t)(5000 * motor_D_speed_factor);
+	                if (motor_running) drive_both(cruise_A, cruise_D, 1);
+	                check_distance_complete();
+	            }
+	        }
+
+	        // Report without driving
+	        fwdt2_last_counts = 0;
+	        fwdt2_total_counts += 0;
+
+	        float total_cm = fwdt2_total_counts * CM_PER_COUNT / 2.325f;
+	        char msg[50];
+	        snprintf(msg, sizeof(msg), "FWD2D:0.0 T:%.1f PRE\r\n", total_cm);
+	        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 50);
+
+	        obstacle_count++;
+	        if (obstacle_count == 1)
+	            HAL_UART_Transmit(&huart3, (uint8_t*)"capture1\r\n", 10, 50);
+	        else
+	            HAL_UART_Transmit(&huart3, (uint8_t*)"capture2\r\n", 10, 50);
+
+	        return;
+	    }
+
+	    // --- Normal fwdt2 logic ---
+	    TIM2->CNT = 0;
+	    TIM5->CNT = 0;
+	    position = 0;
+	    distance_start_position = 0;
+	    distance_target_counts = 99999;
+
+	    motor_running = 1;
+	    motor_direction = 0;
+	    Servo_SetPWM(servo_straight);
+	    distance_mode = 1;
+	    fwdt2_mode = 1;
+
+	    error = 0;
+	    error_old = 0;
+	    error_area = 0;
+	    err = 0;
+
+	    heading_err = 0.0f;
+	    steer_t_prev = HAL_GetTick();
+	}
+
+	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+		//BASE
+
+	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 //	void fwdt2(void) {
 //		if (obstacle_count == 0) {
 //		        fwdt2_total_counts = 0;  // fresh run
@@ -1560,98 +1670,110 @@ const int slow_outer = 4500,  slow_inner = 2250;
 //	    steer_t_prev = HAL_GetTick(); // <-- add here
 //	}
 
-	void fwdt2(void) {
-	    if (obstacle_count == 0) {
-	        fwdt2_total_counts = 0;
-	    }
 
-	    // --- Pre-check: sample US a few times ---
-	    for (int i = 0; i < 3; i++) {
-	        HCSR04_Trigger();
-	        HAL_Delay(US_TRIGGER_INTERVAL_MS);
-	        float dist = HCSR04_ProcessCapture();
-	        if (dist > 0) us_live_distance_cm = dist;
-	    }
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	    float target = US_OBSTACLE_THRESHOLD_CM;  // 43cm
+	//USE INSIDE
 
-	    // Already within ±2cm of threshold — don't move, report immediately
-	    if (us_live_distance_cm > 0 && us_live_distance_cm <= target + 2.0f) {
-
-	        // Too close? Back up to ~target
-	        if (us_live_distance_cm < target - 2.0f) {
-	            int backup_cm = (int)(target - us_live_distance_cm);
-	            if (backup_cm < 1) backup_cm = 1;
-	            rev(backup_cm);
-	            // Wait for rev to complete
-	            while (distance_mode == 1) {
-	                HCSR04_ContinuousUpdate();
-	                int32_t cruise_A = (int32_t)(5000 * motor_A_speed_factor);
-	                int32_t cruise_D = (int32_t)(5000 * motor_D_speed_factor);
-	                if (motor_running) drive_both(cruise_A, cruise_D, 1);
-	                check_distance_complete();
-	            }
-	        }
-
-	        // Already at obstacle — report without driving
-	        fwdt2_last_counts = 0;
-	        fwdt2_total_counts += 0;
-
-	        float total_cm = fwdt2_total_counts * CM_PER_COUNT / 2.325f;
-	        char msg[50];
-	        snprintf(msg, sizeof(msg), "FWD2D:0.0 T:%.1f PRE\r\n", total_cm);
-	        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 50);
-
-	        obstacle_count++;
-	        if (obstacle_count == 1)
-	            HAL_UART_Transmit(&huart3, (uint8_t*)"capture1\r\n", 10, 50);
-	        else
-	            HAL_UART_Transmit(&huart3, (uint8_t*)"capture2\r\n", 10, 50);
-
-	        return;
-	    }
-
-	    // Too far but within a reasonable nudge range? Drive forward to get closer
-	    // (e.g. US reads 50cm but threshold is 43 — nudge fwd ~7cm)
-	    if (us_live_distance_cm > target + 2.0f && us_live_distance_cm <= target + 20.0f) {
-	        int nudge_cm = (int)(us_live_distance_cm - target);
-	        if (nudge_cm < 1) nudge_cm = 1;
-
-	        char msg[40];
-	        snprintf(msg, sizeof(msg), "FWD2_NUDGE %dcm\r\n", nudge_cm);
-	        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 50);
-
-	        fwd(nudge_cm);
-	        while (distance_mode == 1) {
-	            HCSR04_ContinuousUpdate();
-	            int32_t cruise_A = (int32_t)(5000 * motor_A_speed_factor);
-	            int32_t cruise_D = (int32_t)(5000 * motor_D_speed_factor);
-	            if (motor_running) drive_both(cruise_A, cruise_D, 0);
-	            check_distance_complete();
-	        }
-	    }
-
-	    // --- Normal fwdt2 logic ---
-	    TIM2->CNT = 0;
-	    TIM5->CNT = 0;
-	    position = 0;
-	    distance_start_position = 0;
-	    distance_target_counts = 99999;
-
-	    motor_running = 1;
-	    motor_direction = 0;
-	    Servo_SetPWM(servo_straight);
-	    distance_mode = 1;
-	    fwdt2_mode = 1;
-
-	    error = 0;
-	    error_old = 0;
-	    error_area = 0;
-	    err = 0;
-
-	    heading_err = 0.0f;
-	    steer_t_prev = HAL_GetTick();
-	}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	void fwdt2(void) {
+//	    if (obstacle_count == 0) {
+//	        fwdt2_total_counts = 0;
+//	    }
+//	    if (HAL_GetTick() - last_us_telem > 500) {
+//	        last_us_telem = HAL_GetTick();
+//	        char us_msg[30];
+//	        snprintf(us_msg, sizeof(us_msg), "US:%.1f\r\n", us_live_distance_cm);
+//	        HAL_UART_Transmit(&huart3, (uint8_t*)us_msg, strlen(us_msg), 10);
+//	    }
+//
+//	    // --- Pre-check: sample US a few times ---
+//	    for (int i = 0; i < 3; i++) {
+//	        HCSR04_Trigger();
+//	        HAL_Delay(US_TRIGGER_INTERVAL_MS);
+//	        float dist = HCSR04_ProcessCapture();
+//	        if (dist > 0) us_live_distance_cm = dist;
+//	    }
+//
+//	    float target = US_OBSTACLE_THRESHOLD_CM;  // 40cm
+//
+//	    // Already within ±2cm of threshold — don't move, report immediately
+//	    if (us_live_distance_cm > 0 && us_live_distance_cm <= target + 2.0f) {
+//
+//	        // Too close? Back up to ~target
+//	        if (us_live_distance_cm < target - 2.0f) {
+//	            int backup_cm = (int)(target - us_live_distance_cm);
+//	            if (backup_cm < 1) backup_cm = 1;
+//	            rev(backup_cm);
+//	            // Wait for rev to complete
+//	            while (distance_mode == 1) {
+//	                HCSR04_ContinuousUpdate();
+//	                int32_t cruise_A = (int32_t)(5000 * motor_A_speed_factor);
+//	                int32_t cruise_D = (int32_t)(5000 * motor_D_speed_factor);
+//	                if (motor_running) drive_both(cruise_A, cruise_D, 1);
+//	                check_distance_complete();
+//	            }
+//	        }
+//
+//	        // Already at obstacle — report without driving
+//	        fwdt2_last_counts = 0;
+//	        fwdt2_total_counts += 0;
+//
+//	        float total_cm = fwdt2_total_counts * CM_PER_COUNT / 2.325f;
+//	        char msg[50];
+//	        snprintf(msg, sizeof(msg), "FWD2D:0.0 T:%.1f PRE\r\n", total_cm);
+//	        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 50);
+//
+//	        obstacle_count++;
+//	        if (obstacle_count == 1)
+//	            HAL_UART_Transmit(&huart3, (uint8_t*)"capture1\r\n", 10, 50);
+//	        else
+//	            HAL_UART_Transmit(&huart3, (uint8_t*)"capture2\r\n", 10, 50);
+//
+//	        return;
+//	    }
+//
+//	    // Too far but within a reasonable nudge range? Drive forward to get closer
+//	    // (e.g. US reads 50cm but threshold is 43 — nudge fwd ~7cm)
+//	    if (us_live_distance_cm > target + 2.0f && us_live_distance_cm <= target + 20.0f) {
+//	        int nudge_cm = (int)(us_live_distance_cm - target);
+//	        if (nudge_cm < 1) nudge_cm = 1;
+//
+//	        char msg[40];
+//	        snprintf(msg, sizeof(msg), "FWD2_NUDGE %dcm\r\n", nudge_cm);
+//	        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 50);
+//
+//	        fwd(nudge_cm);
+//	        while (distance_mode == 1) {
+//	            HCSR04_ContinuousUpdate();
+//	            int32_t cruise_A = (int32_t)(5000 * motor_A_speed_factor);
+//	            int32_t cruise_D = (int32_t)(5000 * motor_D_speed_factor);
+//	            if (motor_running) drive_both(cruise_A, cruise_D, 0);
+//	            check_distance_complete();
+//	        }
+//	    }
+//
+//	    // --- Normal fwdt2 logic ---
+//	    TIM2->CNT = 0;
+//	    TIM5->CNT = 0;
+//	    position = 0;
+//	    distance_start_position = 0;
+//	    distance_target_counts = 99999;
+//
+//	    motor_running = 1;
+//	    motor_direction = 0;
+//	    Servo_SetPWM(servo_straight);
+//	    distance_mode = 1;
+//	    fwdt2_mode = 1;
+//
+//	    error = 0;
+//	    error_old = 0;
+//	    error_area = 0;
+//	    err = 0;
+//
+//	    heading_err = 0.0f;
+//	    steer_t_prev = HAL_GetTick();
+//	}
 	void fwd(int distance_cm) {
 	    // Convert cm to encoder counts
 		 distance_target_counts = (int32_t)((distance_cm / CM_PER_COUNT) * 2.325);
@@ -2143,7 +2265,7 @@ int main(void)
 			      else if (strncmp(uart3_line, "FWDT2", 5) == 0)
 			      {
 			          fwdt2();
-			          //HAL_UART_Transmit(&huart3, (uint8_t*)"CAPTURE1\r\n", 10, HAL_MAX_DELAY);
+			          HAL_UART_Transmit(&huart3, (uint8_t*)"D0N3\r\n", 10, HAL_MAX_DELAY);
 			      }
 			      else if (strncmp(uart3_line, "RIGHT2", 6) == 0)
 			      {
@@ -2243,7 +2365,7 @@ int main(void)
 		              switch (seq_step) {
 		                  case 0: turn_left_gyro(50.0f);  seq_step++; break;
 		                  case 1: turn_right_gyro(50.0f); seq_step++; break;
-		                  case 2: fwd(12); seq_step++; break;
+		                  case 2: fwd(13); seq_step++; break;
 		                  case 3: turn_right_gyro(50.0f); seq_step++; break;
 		                  case 4: turn_left_gyro(50.0f);  seq_step++; break;
 		                  case 5: fwdt2(); seq_step++; break;
@@ -2265,21 +2387,36 @@ int main(void)
 		              switch (seq_step) {
 		                  case 0: turn_right_gyro(90.0f);       seq_step++; break;
 		                  case 1: fwd_until_ir_clear(1);        seq_step++; break;
-		                  case 2: turn_left_gyro_t2(180.0f);    seq_step++; break;
+		                  case 2: turn_left_gyro_t2(182.5f);    seq_step++; break;
 		                  case 3: fwd_until_ir_clear_v2(1);     seq_step++; break;
-		                  case 4: turn_left_gyro(86.5f);        seq_step++; break;
-		                  case 5: {
+		                  case 4: {
+		                      if (v2_dist_cm < 110.0f) {
+		                          //int remaining = (int)(115.0f - v2_dist_cm);
+		                          //char dbg[40];
+		                          //snprintf(dbg, sizeof(dbg), "R2_CREEP %dcm\r\n", remaining);
+		                          //HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
+		                          fwd(15);
+		                          seq_step++;
+		                      } else {
+		                          seq_step++;
+		                      }
+		                      break;
+		                  }
+
+		                  case 5: turn_left_gyro(86.5f);        seq_step++; break;
+		                  case 6: {
 		                      int drive_back_cm = (int)(fwdt2_total_counts * CM_PER_COUNT / 2.325f);
-		                      drive_back_cm -= 10;
+		                      //drive_back_cm -= 10;
 		                      if (drive_back_cm < 10) drive_back_cm = 10;
+		                      drive_back_cm = drive_back_cm + 13 ;
 		                      fwd(drive_back_cm);
 		                      seq_step++;
 		                      break;
 		                  }
-		                  case 6: turn_left_gyro(90.0f);        seq_step++; break;
+		                  case 7: turn_left_gyro(94.0f);        seq_step++; break;
 
 		                  // Nudge fwd 5cm at a time until RIR > 50, skip if already >50 or garbage
-		                  case 7: {
+		                  case 8: {
 		                      float ir = ir_read_pa2();
 		                      snprintf(dbg, sizeof(dbg), "R2_ALN %.1f\r\n", ir);
 		                      HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
@@ -2312,9 +2449,9 @@ int main(void)
 		                      break;
 		                  }
 
-		                  case 8: rev(0);       seq_step++; break;
-		                  case 9: turn_right_gyro(80.0f);       seq_step++; break;
-		                  case 10: {
+		                  case 9: rev(9);       seq_step++; break; //0 for inside
+		                  case 10: turn_right_gyro(80.0f);       seq_step++; break;
+		                  case 11: {
 		                      us_obstacle_stopped = 0;
 		                      TIM2->CNT = 0;
 		                      TIM5->CNT = 0;
@@ -2360,7 +2497,7 @@ int main(void)
 		                      seq_step++;
 		                      break;
 		                  }
-		                  case 11:
+		                  case 12:
 		                      seq_active = 0;
 		                      HAL_UART_Transmit(&huart3, (uint8_t*)"OK RIGHT2\r\n", 11, 50);
 		                      break;
@@ -2381,19 +2518,33 @@ int main(void)
 		                  case 1: fwd_until_ir_clear(0);            seq_step++; break;
 		                  case 2: turn_right_gyro_t2(180.0f);       seq_step++; break;
 		                  case 3: fwd_until_ir_clear_v2(0);         seq_step++; break;
-		                  case 4: turn_right_gyro(86.5f);           seq_step++; break;
-		                  case 5: {
+		                  case 4: {
+		                      if (v2_dist_cm <110.0f) {
+		                          //int remaining = (int)(115.0f - v2_dist_cm);
+		                          //char dbg[40];
+		                          //snprintf(dbg, sizeof(dbg), "L2_CREEP %dcm\r\n", remaining);
+		                          //HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
+		                          fwd(15);
+		                          seq_step++;
+		                      } else {
+		                          seq_step++;
+		                      }
+		                      break;
+		                  }
+		                  case 5: turn_right_gyro(90.0f);           seq_step++; break;
+		                  case 6: {
 		                      int drive_back_cm = (int)(fwdt2_total_counts * CM_PER_COUNT / 2.325f);
-		                      drive_back_cm -= 10;
+		                      //drive_back_cm -= 10;
 		                      if (drive_back_cm < 10) drive_back_cm = 10;
+		                      drive_back_cm = drive_back_cm + 13;
 		                      fwd(drive_back_cm);
 		                      seq_step++;
 		                      break;
 		                  }
-		                  case 6: turn_right_gyro(90.0f);           seq_step++; break;
+		                  case 7: turn_right_gyro(90.0f);           seq_step++; break;
 
 		                  // Slow drive until LIR > 50, skip if already >50 or garbage
-		                  case 7: {
+		                  case 8: {
 		                      float ir = ir_read_pa3();
 		                      snprintf(dbg, sizeof(dbg), "L2_ALN %.1f\r\n", ir);
 		                      HAL_UART_Transmit(&huart3, (uint8_t*)dbg, strlen(dbg), 50);
@@ -2424,9 +2575,9 @@ int main(void)
 		                      break;
 		                  }
 
-		                  case 8: rev(0);                           seq_step++; break;
-		                  case 9: turn_left_gyro(80.0f);            seq_step++; break;
-		                  case 10: {
+		                  case 9: rev(9);                           seq_step++; break; //0 for inside
+		                  case 10: turn_left_gyro(82.0f);            seq_step++; break;
+		                  case 11: {
 		                      us_obstacle_stopped = 0;
 		                      TIM2->CNT = 0;
 		                      TIM5->CNT = 0;
@@ -2472,7 +2623,7 @@ int main(void)
 		                      seq_step++;
 		                      break;
 		                  }
-		                  case 11:
+		                  case 12:
 		                      seq_active = 0;
 		                      HAL_UART_Transmit(&huart3, (uint8_t*)"OK LEFT2\r\n", 10, 50);
 		                      break;
@@ -2527,20 +2678,59 @@ int main(void)
 		  if (pwm_D > pwmMax) pwm_D = pwmMax;
 
 		  // Motors ALWAYS spin forward (ignore direction_state for motors)
+//		  if (motor_running == 0) { //old motor control
+//			  Motor_stop();  // Mode 0: STOP
+//		  } else {
+//		      if (motor_direction == 0) {
+//		    	  Motor_reverse(pwm_A);
+//				  MotorD_reverse(pwm_D);
+//		      }
+////		      else if (motor_direction == 2) {
+////		      		          Motor_reverse(pwm_A);
+////		      		        MotorD_forward(pwm_D);
+////		      		      } //crab turn
+//		      else {
+//		    	  Motor_forward(pwm_A);
+//				  MotorD_forward(pwm_D);
+//		      }
+//		  }
+
 		  if (motor_running == 0) {
-			  Motor_stop();  // Mode 0: STOP
-		  } else {
+		      Motor_stop();
+		  } else if (distance_mode == 1) {
+		      int32_t encA = abs((int16_t)TIM2->CNT);
+		      int32_t encD = abs((int16_t)TIM5->CNT);
+		      int32_t diff = encA - encD;
+
+		      float Kp_steer = 2.5f;
+		      int32_t correction = (int32_t)(diff * Kp_steer);
+
+		      int32_t base_A = (int32_t)(5550 * motor_A_speed_factor);
+		      int32_t base_D = (int32_t)(5550 * motor_D_speed_factor);
+
+		      int32_t pwm_A = base_A - correction;
+		      int32_t pwm_D = base_D + correction;
+
+		      if (pwm_A < 800) pwm_A = 800;
+		      if (pwm_D < 800) pwm_D = 800;
+		      if (pwm_A > pwmMax) pwm_A = pwmMax;
+		      if (pwm_D > pwmMax) pwm_D = pwmMax;
+
 		      if (motor_direction == 0) {
-		    	  Motor_reverse(pwm_A);
-				  MotorD_reverse(pwm_D);
+		          Motor_reverse(pwm_A);
+		          MotorD_reverse(pwm_D);
+		      } else {
+		          Motor_forward(pwm_A);
+		          MotorD_forward(pwm_D);
 		      }
-//		      else if (motor_direction == 2) {
-//		      		          Motor_reverse(pwm_A);
-//		      		        MotorD_forward(pwm_D);
-//		      		      } //crab turn
-		      else {
-		    	  Motor_forward(pwm_A);
-				  MotorD_forward(pwm_D);
+		  } else {
+		      // Non-distance mode (manual/legacy) — use old PID path
+		      if (motor_direction == 0) {
+		          Motor_reverse(pwm_A);
+		          MotorD_reverse(pwm_D);
+		      } else {
+		          Motor_forward(pwm_A);
+		          MotorD_forward(pwm_D);
 		      }
 		  }
 //
