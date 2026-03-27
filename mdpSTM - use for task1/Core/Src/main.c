@@ -359,6 +359,18 @@
 //	}
 	volatile uint8_t do_left_turn = 0;
 	//buttoncode
+	void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+	{
+	    if (GPIO_Pin == USER_PB_Pin)
+	    {
+	        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12);
+	        static uint32_t last_ms = 0;
+	        uint32_t now = HAL_GetTick();
+	        if (now - last_ms < 200) return;
+	        last_ms = now;
+	        do_left_turn = 1;
+	    }
+	}
 //	void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 //	{
 //	    if (GPIO_Pin == USER_PB_Pin)
@@ -1003,7 +1015,7 @@
 	// ============================================================
 	void turn_left_gyro(float target_deg)
 	{
-		target_deg = 90;
+		target_deg = 89;
 	    Motor_stop();
 	    HAL_Delay(200);
 	    gyro_calibrate_bias();
@@ -1634,6 +1646,62 @@
 //			    }
 
 			    //UART3_Poll_Line();
+			    if (do_left_turn) {
+			        do_left_turn = 0;
+
+			        HAL_Delay(5000);
+
+			        fwd(100);
+			        while (distance_mode == 1) {
+			            int32_t encA = abs((int16_t)TIM2->CNT);
+			            int32_t encD = abs((int16_t)TIM5->CNT);
+			            position = (int16_t)((encA + encD) / 2);
+			            int32_t steer_error = encA - encD;
+			            float Kp_steer = 2.5f;
+			            int32_t correction = (int32_t)(Kp_steer * steer_error);
+			            int32_t base_A = (int32_t)(6500 * motor_A_speed_factor) - correction;
+			            int32_t base_D = (int32_t)(6500 * motor_D_speed_factor) + correction;
+			            if (base_A < 250) base_A = 250;
+			            if (base_D < 250) base_D = 250;
+			            if (base_A > pwmMax) base_A = pwmMax;
+			            if (base_D > pwmMax) base_D = pwmMax;
+			            if (motor_running) drive_both(base_A, base_D, motor_direction);
+			            check_distance_complete();
+			        }
+
+			        HAL_Delay(3000);
+
+			        rev(100);
+			        while (distance_mode == 1) {
+			            int32_t encA = abs((int16_t)TIM2->CNT);
+			            int32_t encD = abs((int16_t)TIM5->CNT);
+			            position = (int16_t)((encA + encD) / 2);
+			            int32_t steer_error = encA - encD;
+			            if (motor_direction == 1) steer_error = -steer_error;
+			            float Kp_steer = 2.5f;
+			            int32_t correction = (int32_t)(Kp_steer * steer_error);
+			            int32_t base_A = (int32_t)(6500 * motor_A_speed_factor) - correction;
+			            int32_t base_D = (int32_t)(6500 * motor_D_speed_factor) + correction;
+			            if (base_A < 250) base_A = 250;
+			            if (base_D < 250) base_D = 250;
+			            if (base_A > pwmMax) base_A = pwmMax;
+			            if (base_D > pwmMax) base_D = pwmMax;
+			            if (motor_running) drive_both(base_A, base_D, motor_direction);
+			            check_distance_complete();
+			        }
+
+			        turn_left_gyro(90.0f);
+			        HAL_Delay(3000);
+
+			        revl(90.0f);
+			        HAL_Delay(3000);
+			        turn_right_gyro(90.0f);
+			        HAL_Delay(3000);
+			        revr(90.0f);
+
+			        Motor_stop();
+			        Servo_SetPWM(servo_straight);
+			    }
 
 			  if (uart3_line_ready)
 			  {
