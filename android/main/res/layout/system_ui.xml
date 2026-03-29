@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        app:title="SC2079_group25"
+        app:titleTextColor="@color/white" />
+
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/tabLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:tabGravity="fill"
+        app:tabMode="fixed">
+        <com.google.android.material.tabs.TabItem
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Bluetooth" />
+        <com.google.android.material.tabs.TabItem
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Grid" />
+    </com.google.android.material.tabs.TabLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:padding="12dp">
+
+        <!-- Bluetooth Page -->
+        <LinearLayout
+            android:id="@+id/layoutBluetooth"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnScan"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:text="Scan" />
+
+                <Button
+                    android:id="@+id/btnReconnect"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:text="Reconnect" />
+
+                <Button
+                    android:id="@+id/btnDisconnect"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Disconnect" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/txtConnState"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="8dp"
+                android:text="Not connected"
+                android:textStyle="bold" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerDevices"
+                android:layout_width="match_parent"
+                android:layout_height="200dp"
+                android:paddingTop="8dp" />
+
+            <ScrollView
+                android:id="@+id/scrollTerminal"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="8dp"
+                android:layout_weight="1"
+                android:background="#F0F0F0"
+                android:padding="8dp">
+
+                <TextView
+                    android:id="@+id/txtTerminal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="Terminal logs"
+                    android:textColor="#333333"
+                    android:textIsSelectable="true"
+                    android:textSize="10sp" />
+            </ScrollView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="8dp">
+
+                <EditText
+                    android:id="@+id/edtSend"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="Type message"
+                    android:importantForAutofill="no"
+                    android:inputType="text"
+                    android:minHeight="48dp" />
+
+                <Button
+                    android:id="@+id/btnSend"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="Send" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Grid Page -->
+        <LinearLayout
+            android:id="@+id/layoutGrid"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="invisible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Exploration Arena"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnUndo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:minWidth="60dp"
+                    android:text="Undo" />
+
+                <Button
+                    android:id="@+id/btnRedo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:minWidth="60dp"
+                    android:text="Redo" />
+
+                <Button
+                    android:id="@+id/btnReset"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="60dp"
+                    android:text="Reset" />
+            </LinearLayout>
+
+            <!-- Arena View -->
+            <com.example.sc2079_group25.ArenaView
+                android:id="@+id/arenaView"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="1dp"
+                android:layout_weight="1"
+                android:background="#FFFFFF"
+                android:clickable="true"
+                android:contentDescription="Exploration arena map"
+                android:focusable="true" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
+                android:orientation="horizontal"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Robot Status: "
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/txtRobotStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Waiting"
+                    android:textColor="#0000FF" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingBottom="16dp">
+
+                <GridLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:columnCount="3"
+                    android:rowCount="3">
+
+                    <View
+                        android:layout_width="48dp"
+                        android:layout_height="48dp" />
+
+                    <ImageButton
+                        android:id="@+id/btnForward"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:contentDescription="Forward"
+                        android:src="@android:drawable/arrow_up_float" />
+
+                    <View
+                        android:layout_width="48dp"
+                        android:layout_height="48dp" />
+
+                    <ImageButton
+                        android:id="@+id/btnLeft"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:contentDescription="Turn Left"
+                        android:rotation="90"
+                        android:src="@android:drawable/arrow_down_float" />
+
+                    <ImageButton
+                        android:id="@+id/btnReverse"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:contentDescription="Reverse"
+                        android:src="@android:drawable/arrow_down_float" />
+
+                    <ImageButton
+                        android:id="@+id/btnRight"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:contentDescription="Turn Right"
+                        android:rotation="270"
+                        android:src="@android:drawable/arrow_down_float" />
+                </GridLayout>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:orientation="vertical">
+
+                    <Button
+                        android:id="@+id/btnSendObs"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minHeight="40dp"
+                        android:text="Send Obs"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnTask1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:minHeight="40dp"
+                        android:text="Task 1"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnTask2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:minHeight="40dp"
+                        android:text="Task 2"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+    </FrameLayout>
+</LinearLayout>
